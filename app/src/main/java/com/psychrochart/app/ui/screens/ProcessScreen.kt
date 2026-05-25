@@ -212,6 +212,7 @@ private fun secInputLabel(s: SecondaryInput) = when (s) {
     SecondaryInput.DPT -> "Dew-Point Temp"
     SecondaryInput.W   -> "Humidity Ratio"
     SecondaryInput.V   -> "Specific Volume"
+    SecondaryInput.H   -> "Specific Enthalpy"
 }
 
 private fun secInputUnit(s: SecondaryInput) = when (s) {
@@ -219,6 +220,7 @@ private fun secInputUnit(s: SecondaryInput) = when (s) {
     SecondaryInput.WBT, SecondaryInput.DPT -> "°C"
     SecondaryInput.W   -> "kg/kg"
     SecondaryInput.V   -> "m³/kg"
+    SecondaryInput.H   -> "kJ/kg"
 }
 
 private fun buildState(vm: MainViewModel, dbt: Double, sec: SecondaryInput, value: Double) =

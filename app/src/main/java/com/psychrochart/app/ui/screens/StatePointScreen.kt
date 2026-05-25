@@ -107,6 +107,7 @@ private fun secondaryLabel(input: SecondaryInput) = when (input) {
     SecondaryInput.RH  -> "Relative Humidity"
     SecondaryInput.W   -> "Humidity Ratio"
     SecondaryInput.V   -> "Specific Volume"
+    SecondaryInput.H   -> "Specific Enthalpy"
 }
 
 private fun secondaryUnit(input: SecondaryInput) = when (input) {
@@ -115,6 +116,7 @@ private fun secondaryUnit(input: SecondaryInput) = when (input) {
     SecondaryInput.RH  -> "%"
     SecondaryInput.W   -> "kg/kg"
     SecondaryInput.V   -> "m³/kg"
+    SecondaryInput.H   -> "kJ/kg"
 }
 
 private fun defaultValue(input: SecondaryInput) = when (input) {
@@ -123,4 +125,5 @@ private fun defaultValue(input: SecondaryInput) = when (input) {
     SecondaryInput.DPT -> "13"
     SecondaryInput.W   -> "0.0099"
     SecondaryInput.V   -> "0.855"
+    SecondaryInput.H   -> "55.0"
 }

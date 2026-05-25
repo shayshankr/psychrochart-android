@@ -12,7 +12,7 @@ data class PsychroState(
     val mu: Double,    // Degree of saturation
 )
 
-enum class SecondaryInput { WBT, DPT, RH, W, V }
+enum class SecondaryInput { WBT, DPT, RH, W, V, H }
 
 enum class ProcessType(val label: String) {
     SENSIBLE_HEATING("Sensible Heating"),

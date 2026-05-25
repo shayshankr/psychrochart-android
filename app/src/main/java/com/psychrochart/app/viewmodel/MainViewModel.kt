@@ -3,6 +3,7 @@ package com.psychrochart.app.viewmodel
 import androidx.lifecycle.ViewModel
 import com.psychrochart.app.domain.*
 import com.psychrochart.app.domain.PsychroCalc.fromDbtDpt
+import com.psychrochart.app.domain.PsychroCalc.fromDbtH
 import com.psychrochart.app.domain.PsychroCalc.fromDbtRh
 import com.psychrochart.app.domain.PsychroCalc.fromDbtV
 import com.psychrochart.app.domain.PsychroCalc.fromDbtW
@@ -29,6 +30,7 @@ class MainViewModel : ViewModel() {
                 SecondaryInput.RH  -> fromDbtRh(dbt, value)
                 SecondaryInput.W   -> fromDbtW(dbt, value)
                 SecondaryInput.V   -> fromDbtV(dbt, value)
+                SecondaryInput.H   -> fromDbtH(dbt, value)
             }
         }.onSuccess { state ->
             _stateResult.value = state
@@ -117,5 +119,117 @@ class MainViewModel : ViewModel() {
         _stateError.value = null
         _processResult.value = null
         _processError.value = null
+    }
+
+    // ── AHU Multi-Process Chain ───────────────────────────────────────────────
+
+    data class AhuStep(
+        val stepNumber: Int,
+        val processType: ProcessType,
+        val stateIn: PsychroState,
+        val stateOut: PsychroState,
+        val metrics: Map<String, String>,
+    )
+
+    private val _ahuInitialState = MutableStateFlow<PsychroState?>(null)
+    val ahuInitialState: StateFlow<PsychroState?> = _ahuInitialState.asStateFlow()
+
+    private val _ahuChain = MutableStateFlow<List<AhuStep>>(emptyList())
+    val ahuChain: StateFlow<List<AhuStep>> = _ahuChain.asStateFlow()
+
+    private val _ahuError = MutableStateFlow<String?>(null)
+    val ahuError: StateFlow<String?> = _ahuError.asStateFlow()
+
+    fun setAhuInitialState(dbt: Double, secondary: SecondaryInput, value: Double) {
+        runCatching {
+            when (secondary) {
+                SecondaryInput.WBT -> fromDbtWbt(dbt, value)
+                SecondaryInput.DPT -> fromDbtDpt(dbt, value)
+                SecondaryInput.RH  -> fromDbtRh(dbt, value)
+                SecondaryInput.W   -> fromDbtW(dbt, value)
+                SecondaryInput.V   -> fromDbtV(dbt, value)
+                SecondaryInput.H   -> fromDbtH(dbt, value)
+            }
+        }.onSuccess { state ->
+            _ahuInitialState.value = state
+            _ahuChain.value = emptyList()
+            _ahuError.value = null
+        }.onFailure { e ->
+            _ahuError.value = "Initial state error: ${e.message}"
+        }
+    }
+
+    fun addAhuStep(
+        processType: ProcessType,
+        param1: Double,
+        param2: Double? = null,
+        param3: Double? = null,
+        useW: Boolean = true,
+        mixSec2: SecondaryInput = SecondaryInput.RH,
+        mixDbt2: Double = 20.0,
+        mixSec2Val: Double = 50.0,
+        mixM1: Double = 1.0,
+        mixM2: Double = 1.0,
+    ) {
+        val currentIn = if (_ahuChain.value.isEmpty()) _ahuInitialState.value
+                        else _ahuChain.value.last().stateOut
+        if (currentIn == null) {
+            _ahuError.value = "Set an initial state before adding steps."
+            return
+        }
+        runCatching {
+            when (processType) {
+                ProcessType.SENSIBLE_HEATING         -> Processes.sensibleHeating(currentIn, param1)
+                ProcessType.SENSIBLE_COOLING         -> Processes.sensibleCooling(currentIn, param1)
+                ProcessType.HUMIDIFICATION           ->
+                    if (useW) Processes.humidification(currentIn, w2 = param1)
+                    else      Processes.humidification(currentIn, rh2Pct = param1)
+                ProcessType.DEHUMIDIFICATION         ->
+                    if (useW) Processes.dehumidification(currentIn, w2 = param1)
+                    else      Processes.dehumidification(currentIn, rh2Pct = param1)
+                ProcessType.COOLING_DEHUMIDIFICATION ->
+                    if (useW) Processes.coolingDehumidification(currentIn, param1, w2 = param2)
+                    else      Processes.coolingDehumidification(currentIn, param1, rh2Pct = param2)
+                ProcessType.HEATING_HUMIDIFICATION   ->
+                    if (useW) Processes.heatingHumidification(currentIn, param1, w2 = param2)
+                    else      Processes.heatingHumidification(currentIn, param1, rh2Pct = param2)
+                ProcessType.EVAPORATIVE_COOLING      -> Processes.evaporativeCooling(currentIn, param1)
+                ProcessType.ADIABATIC_MIXING         -> {
+                    val s2 = when (mixSec2) {
+                        SecondaryInput.WBT -> fromDbtWbt(mixDbt2, mixSec2Val)
+                        SecondaryInput.DPT -> fromDbtDpt(mixDbt2, mixSec2Val)
+                        SecondaryInput.RH  -> fromDbtRh(mixDbt2, mixSec2Val)
+                        SecondaryInput.W   -> fromDbtW(mixDbt2, mixSec2Val)
+                        SecondaryInput.V   -> fromDbtV(mixDbt2, mixSec2Val)
+                        SecondaryInput.H   -> fromDbtH(mixDbt2, mixSec2Val)
+                    }
+                    Processes.adiabaticMixing(currentIn, s2, mixM1, mixM2)
+                }
+            }
+        }.onSuccess { result ->
+            val step = AhuStep(
+                stepNumber  = _ahuChain.value.size + 1,
+                processType = processType,
+                stateIn     = result.state1,
+                stateOut    = result.state2,
+                metrics     = result.metrics,
+            )
+            _ahuChain.value = _ahuChain.value + step
+            _ahuError.value = null
+        }.onFailure { e ->
+            _ahuError.value = "Step error: ${e.message}"
+        }
+    }
+
+    fun removeLastAhuStep() {
+        if (_ahuChain.value.isNotEmpty())
+            _ahuChain.value = _ahuChain.value.dropLast(1)
+        _ahuError.value = null
+    }
+
+    fun clearAhuChain() {
+        _ahuChain.value = emptyList()
+        _ahuInitialState.value = null
+        _ahuError.value = null
     }
 }

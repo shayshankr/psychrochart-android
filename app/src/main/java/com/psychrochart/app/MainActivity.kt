@@ -18,6 +18,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.psychrochart.app.ui.navigation.Screen
 import com.psychrochart.app.ui.navigation.bottomNavScreens
+import com.psychrochart.app.ui.screens.AhuChainScreen
 import com.psychrochart.app.ui.screens.ChartScreen
 import com.psychrochart.app.ui.screens.ProcessScreen
 import com.psychrochart.app.ui.screens.StatePointScreen
@@ -64,6 +65,7 @@ class MainActivity : ComponentActivity() {
                         composable(Screen.StatePoint.route) { StatePointScreen(vm) }
                         composable(Screen.Processes.route)  { ProcessScreen(vm) }
                         composable(Screen.Chart.route)      { ChartScreen(vm) }
+                        composable(Screen.AhuChain.route)   { AhuChainScreen(vm) }
                     }
                 }
             }

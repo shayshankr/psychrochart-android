@@ -136,6 +136,15 @@ object PsychroCalc {
     fun fromDbtV(dbt: Double, v: Double) =
         makeState(dbt, humRatioFromSpecVol(dbt, v))
 
+    fun fromDbtH(dbt: Double, hKj: Double): PsychroState {
+        val denom = 2501.0 + 1.86 * dbt
+        if (denom <= 0) throw IllegalArgumentException(
+            "Cannot derive W from h=$hKj kJ/kg at DBT=$dbt °C"
+        )
+        val w = (hKj - 1.006 * dbt) / denom
+        return makeState(dbt, maxOf(W_EPSILON, w))
+    }
+
     // ── Chart line data ────────────────────────────────────────────────────────
 
     data class LineData(val points: List<Pair<Double, Double>>)
