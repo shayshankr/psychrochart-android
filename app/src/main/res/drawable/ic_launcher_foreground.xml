@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Chart background rect (safe zone 21..87) -->
+    <path
+        android:fillColor="#14FFFFFF"
+        android:pathData="M20,30 L88,30 L88,82 L20,82 Z"/>
+
+    <!-- Saturation curve (approximate arc) -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:pathData="M20,82 Q40,78 55,60 Q70,42 88,30"/>
+
+    <!-- 70% RH curve -->
+    <path
+        android:strokeColor="#1ABC9C"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M20,82 Q42,80 58,68 Q74,56 88,42"/>
+
+    <!-- 40% RH curve -->
+    <path
+        android:strokeColor="#1ABC9C"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M20,82 Q45,81 62,74 Q78,68 88,58"/>
+
+    <!-- Chart border -->
+    <path
+        android:strokeColor="#44FFFFFF"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M20,30 L88,30 L88,82 L20,82 Z"/>
+
+    <!-- State-point dot (orange) -->
+    <path
+        android:fillColor="#E67E22"
+        android:pathData="M65,52 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0"/>
+    <!-- White centre -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M65,52 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0"/>
+</vector>
