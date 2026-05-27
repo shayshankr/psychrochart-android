@@ -40,6 +40,9 @@ object PsychroCalc {
 
     // ── Humidity ratio helpers ─────────────────────────────────────────────────
 
+    /** Saturation humidity ratio at [dbt] °C (equivalent to RH = 100 %). */
+    fun wSat(dbt: Double) = humRatioFromRelHum(dbt, 1.0)
+
     fun humRatioFromRelHum(dbt: Double, rhFrac: Double): Double {
         val pws = saturationPressure(dbt)
         return maxOf(W_EPSILON, 0.621945 * pws * rhFrac / (PRESSURE - pws * rhFrac))

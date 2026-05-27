@@ -1,5 +1,10 @@
 package com.psychrochart.app.ui.screens
 
+import android.content.ContentValues
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.rememberTransformableState
@@ -9,21 +14,31 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.drawscope.*
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.layer.rememberGraphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.unit.dp
+import com.psychrochart.app.domain.ProcessType
 import com.psychrochart.app.domain.PsychroCalc
 import com.psychrochart.app.ui.theme.*
 import com.psychrochart.app.viewmodel.MainViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.sqrt
 
 private const val DBT_MIN = -10.0
@@ -45,7 +60,19 @@ fun ChartScreen(vm: MainViewModel) {
         offset = Offset(offset.x + panChange.x * scale, offset.y + panChange.y * scale)
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    // For saving the chart as an image
+    val captureLayer   = rememberGraphicsLayer()
+    val coroutineScope = rememberCoroutineScope()
+    val context        = LocalContext.current
+
+    Box(modifier = Modifier
+        .fillMaxSize()
+        .background(MaterialTheme.colorScheme.background)
+        .drawWithContent {
+            captureLayer.record { this@drawWithContent.drawContent() }
+            drawLayer(captureLayer)
+        }
+    ) {
 
         Canvas(
             modifier = Modifier
@@ -286,25 +313,39 @@ fun ChartScreen(vm: MainViewModel) {
                 size = Size(plotW, plotH),
                 style = Stroke(2f))
 
-            // ── Process arrow ─────────────────────────────────────────────────
+            // ── Process arrows ────────────────────────────────────────────────
             processResult?.let { result ->
                 val x1 = toX(result.state1.dbt); val y1 = toY(result.state1.w)
                 val x2 = toX(result.state2.dbt); val y2 = toY(result.state2.w)
-                val arrowColor = Color(0xFF2C3E50)
-                val dx = x2 - x1; val dy = y2 - y1
-                val len = sqrt(dx * dx + dy * dy)
-                if (len > 5f) {
-                    drawLine(arrowColor, Offset(x1, y1), Offset(x2, y2), 3f)
-                    val ux = dx / len; val uy = dy / len
-                    val px = -uy;      val py = ux
-                    val headLen = 18f; val hw = 8f
-                    val hx = x2 - ux * headLen; val hy = y2 - uy * headLen
-                    drawPath(Path().apply {
-                        moveTo(x2, y2)
-                        lineTo(hx + px * hw, hy + py * hw)
-                        lineTo(hx - px * hw, hy - py * hw)
-                        close()
-                    }, arrowColor)
+
+                if (result.processType == ProcessType.HEATING_HUMIDIFICATION) {
+                    // Two-step: horizontal red arrow (sensible heating) then
+                    //           vertical  blue arrow (humidification)
+                    val xMid = x2; val yMid = y1   // corner point
+                    val colorH = Color(0xFFE53935)  // red  – heating leg
+                    val colorW = Color(0xFF1E88E5)  // blue – humidification leg
+                    drawArrowSegment(xMid - x1, yMid - y1, x1, y1, xMid, yMid, colorH)
+                    drawArrowSegment(x2 - xMid, y2 - yMid, xMid, yMid, x2, y2, colorW)
+                    // Label near the corner
+                    drawText(textMeasurer, result.processType.label,
+                        topLeft = Offset(xMid + 6f, yMid - 22f),
+                        style = TextStyle(fontSize = 9.sp, color = Color(0xFF2C3E50),
+                            fontWeight = FontWeight.Bold,
+                            background = Color(0xCCFEF9E7)))
+                } else {
+                    // Single straight arrow with process-type colour
+                    val arrowColor = when (result.processType) {
+                        ProcessType.SENSIBLE_HEATING          -> Color(0xFFE53935)
+                        ProcessType.SENSIBLE_COOLING          -> Color(0xFF1E88E5)
+                        ProcessType.HUMIDIFICATION            -> Color(0xFF1E88E5)
+                        ProcessType.DEHUMIDIFICATION          -> Color(0xFF1E88E5)
+                        ProcessType.COOLING_DEHUMIDIFICATION  -> Color(0xFF1E88E5)
+                        ProcessType.EVAPORATIVE_COOLING       -> Color(0xFF00ACC1)
+                        ProcessType.ADIABATIC_MIXING          -> Color(0xFF8E24AA)
+                        else                                  -> Color(0xFF2C3E50)
+                    }
+                    val dx = x2 - x1; val dy = y2 - y1
+                    drawArrowSegment(dx, dy, x1, y1, x2, y2, arrowColor)
                     drawText(textMeasurer, result.processType.label,
                         topLeft = Offset((x1 + x2) / 2f + 6f, (y1 + y2) / 2f - 20f),
                         style = TextStyle(fontSize = 9.sp, color = arrowColor,
@@ -313,18 +354,15 @@ fun ChartScreen(vm: MainViewModel) {
                 }
             }
 
-            // ── State point dots + labels ─────────────────────────────────────
+            // ── State point dots (no text labels — avoid double labelling) ──────
             plottedStates.forEachIndexed { i, ps ->
                 val col = PointColors[i % PointColors.size]
                 val cx  = toX(ps.state.dbt)
-                val cy  = toY(ps.state.w)
+                // Clamp W to saturation so the dot never renders outside the chart
+                val wClamped = minOf(ps.state.w, PsychroCalc.wSat(ps.state.dbt))
+                val cy  = toY(wClamped)
                 drawCircle(col, 14f, Offset(cx, cy))
                 drawCircle(Color.White, 6f, Offset(cx, cy))
-                drawText(textMeasurer, ps.label,
-                    topLeft = Offset(cx + 16f, cy - 18f),
-                    style = TextStyle(fontSize = 9.sp, color = col,
-                        fontWeight = FontWeight.Bold,
-                        background = Color(0xCCFFFFFF)))
             }
         }
 
@@ -376,6 +414,21 @@ fun ChartScreen(vm: MainViewModel) {
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // Save chart as PNG
+            SmallFloatingActionButton(
+                onClick = {
+                    coroutineScope.launch {
+                        val bitmap = captureLayer.toImageBitmap().asAndroidBitmap()
+                        withContext(Dispatchers.IO) {
+                            saveChartToGallery(context, bitmap)
+                        }
+                        Toast.makeText(context, "Chart saved to Gallery", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            ) {
+                Icon(Icons.Default.SaveAlt, "Save chart as image")
+            }
+
             if (plottedStates.isNotEmpty()) {
                 SmallFloatingActionButton(onClick = { vm.clearPlottedStates() }) {
                     Icon(Icons.Default.DeleteSweep, "Clear points")
@@ -389,6 +442,52 @@ fun ChartScreen(vm: MainViewModel) {
 }
 
 // ── Canvas helpers ─────────────────────────────────────────────────────────────
+
+/** Draw a line from (x1,y1) to (x2,y2) with an arrowhead at (x2,y2). */
+private fun DrawScope.drawArrowSegment(
+    dx: Float, dy: Float,
+    x1: Float, y1: Float,
+    x2: Float, y2: Float,
+    color: Color,
+) {
+    val len = sqrt(dx * dx + dy * dy)
+    if (len < 5f) return
+    drawLine(color, Offset(x1, y1), Offset(x2, y2), 3f)
+    val ux = dx / len; val uy = dy / len
+    val px = -uy;      val py =  ux
+    val headLen = 18f; val hw = 8f
+    val hx = x2 - ux * headLen; val hy = y2 - uy * headLen
+    drawPath(Path().apply {
+        moveTo(x2, y2)
+        lineTo(hx + px * hw, hy + py * hw)
+        lineTo(hx - px * hw, hy - py * hw)
+        close()
+    }, color)
+}
+
+/** Save [bitmap] to the device's Pictures/PsychroChart folder via MediaStore. */
+private fun saveChartToGallery(context: android.content.Context, bitmap: android.graphics.Bitmap) {
+    val filename = "PsychroChart_${System.currentTimeMillis()}.png"
+    val values = ContentValues().apply {
+        put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+        put(MediaStore.Images.Media.MIME_TYPE,    "image/png")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            put(MediaStore.Images.Media.RELATIVE_PATH,
+                Environment.DIRECTORY_PICTURES + "/PsychroChart")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+    }
+    val uri = context.contentResolver.insert(
+        MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return
+    context.contentResolver.openOutputStream(uri)?.use { out ->
+        bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        values.clear()
+        values.put(MediaStore.Images.Media.IS_PENDING, 0)
+        context.contentResolver.update(uri, values, null, null)
+    }
+}
 
 private fun DrawScope.drawChartPath(
     points: List<Pair<Double, Double>>,
