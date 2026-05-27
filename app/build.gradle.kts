@@ -13,8 +13,8 @@ android {
         applicationId = "com.psychrochart.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "10.0.0"
+        versionCode = 11
+        versionName = "11.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -61,7 +61,7 @@ android {
 
 play {
     serviceAccountCredentials.set(rootProject.file("play-service-account.json"))
-    track.set("production")
+    track.set("internal")
     defaultToAppBundles.set(true)
     artifactDir.set(layout.buildDirectory.dir("outputs/bundle/release"))
 }
