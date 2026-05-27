@@ -237,8 +237,9 @@ class MainViewModel : ViewModel() {
                 }
             }
         }.onSuccess { result ->
+            val stepNum = _ahuChain.value.size + 1
             val step = AhuStep(
-                stepNumber  = _ahuChain.value.size + 1,
+                stepNumber  = stepNum,
                 processType = processType,
                 stateIn     = result.state1,
                 stateOut    = result.state2,
@@ -246,6 +247,9 @@ class MainViewModel : ViewModel() {
             )
             _ahuChain.value = _ahuChain.value + step
             _ahuError.value = null
+            // Plot both endpoints on the chart so the AHU chain is visible
+            addPlottedState(result.state1, "A${stepNum}in")
+            addPlottedState(result.state2, "A${stepNum}out")
         }.onFailure { e ->
             _ahuError.value = "Step error: ${e.message}"
         }

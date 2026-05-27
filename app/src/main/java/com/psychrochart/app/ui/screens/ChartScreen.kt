@@ -51,7 +51,7 @@ import kotlin.math.sqrt
 private const val DBT_MIN = -10.0
 private const val DBT_MAX =  50.0
 private const val W_MIN   =   0.0
-private const val W_MAX   =   0.030
+private const val W_MAX   =   0.035
 
 // Chart margin constants (pixels in canvas space)
 private const val LEFT_PAD   = 106f
@@ -268,7 +268,7 @@ fun ChartScreen(vm: MainViewModel) {
                             Offset(x, TOP_PAD), Offset(x, TOP_PAD + plotH), 0.7f)
                     }
                     // Major horizontal (every 0.005 kg/kg)
-                    for (i in 0..6) {
+                    for (i in 0..7) {
                         val y = toY(i * 0.005)
                         drawLine(Color.Gray.copy(alpha = 0.18f),
                             Offset(LEFT_PAD, y), Offset(LEFT_PAD + plotW, y), 0.7f)
@@ -373,7 +373,7 @@ fun ChartScreen(vm: MainViewModel) {
                     style = axisTitle)
 
                 // ── Y-axis (kg/kg) ─────────────────────────────────────────────
-                for (i in 0..6) {
+                for (i in 0..7) {
                     val wVal = i * 0.005
                     val y = toY(wVal)
                     drawLine(tickClr, Offset(LEFT_PAD - 7f, y), Offset(LEFT_PAD, y), 1.5f)
@@ -401,7 +401,7 @@ fun ChartScreen(vm: MainViewModel) {
                 }
 
                 // ── Right axis (g/kg) ──────────────────────────────────────────
-                for (i in 0..6) {
+                for (i in 0..7) {
                     val wVal = i * 0.005
                     val y = toY(wVal)
                     drawLine(tickClr.copy(alpha = 0.5f),

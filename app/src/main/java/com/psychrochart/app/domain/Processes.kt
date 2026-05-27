@@ -7,6 +7,9 @@ import com.psychrochart.app.domain.PsychroCalc.fromDbtWbt
 object Processes {
 
     fun sensibleHeating(s1: PsychroState, dbt2: Double): ProcessResult {
+        require(dbt2 > s1.dbt) {
+            "Sensible heating target DBT (%.1f°C) must be greater than inlet DBT (%.1f°C)".format(dbt2, s1.dbt)
+        }
         val s2 = fromDbtW(dbt2, s1.w)
         return ProcessResult(
             state1 = s1, state2 = s2,
@@ -20,6 +23,9 @@ object Processes {
     }
 
     fun sensibleCooling(s1: PsychroState, dbt2: Double): ProcessResult {
+        require(dbt2 < s1.dbt) {
+            "Sensible cooling target DBT (%.1f°C) must be less than inlet DBT (%.1f°C)".format(dbt2, s1.dbt)
+        }
         val s2 = fromDbtW(dbt2, s1.w)
         return ProcessResult(
             state1 = s1, state2 = s2,
@@ -61,17 +67,19 @@ object Processes {
     fun coolingDehumidification(s1: PsychroState, dbt2: Double, w2: Double? = null, rh2Pct: Double? = null): ProcessResult {
         val s2 = if (w2 != null) fromDbtW(dbt2, w2) else fromDbtRh(dbt2, rh2Pct!!)
         val totalHeat = s1.h - s2.h
-        val sensible  = 1.006 * (s1.dbt - s2.dbt)
         val deltaW    = s1.w - s2.w
-        val latent    = 2501.0 * deltaW
+        // Sensible = dry-air + water-vapour sensible; latent = total - sensible
+        // ensures Sensible + Latent = Total exactly (avoids the 1.86*ΔW*ΔT rounding gap)
+        val sensible  = 1.006 * (s1.dbt - s2.dbt) + 1.86 * (s1.w * s1.dbt - s2.w * s2.dbt)
+        val latent    = totalHeat - sensible
         return ProcessResult(
             state1 = s1, state2 = s2,
             processType = ProcessType.COOLING_DEHUMIDIFICATION,
             metrics = mapOf(
-                "Total Heat Removed (kJ/kg)"   to "%.3f".format(totalHeat),
+                "Total Heat Removed (kJ/kg)"    to "%.3f".format(totalHeat),
                 "Sensible Heat Removed (kJ/kg)" to "%.3f".format(sensible),
-                "Latent Heat Removed (kJ/kg)"  to "%.3f".format(latent),
-                "Moisture Removed (kg/kg)"     to "%.6f".format(deltaW),
+                "Latent Heat Removed (kJ/kg)"   to "%.3f".format(latent),
+                "Moisture Removed (kg/kg)"      to "%.6f".format(deltaW),
             )
         )
     }
@@ -90,6 +98,12 @@ object Processes {
     }
 
     fun evaporativeCooling(s1: PsychroState, dbt2: Double): ProcessResult {
+        require(dbt2 >= s1.wbt) {
+            "Evaporative cooling target DBT (%.1f°C) must be ≥ WBT (%.1f°C)".format(dbt2, s1.wbt)
+        }
+        require(dbt2 < s1.dbt) {
+            "Evaporative cooling target DBT (%.1f°C) must be less than inlet DBT (%.1f°C)".format(dbt2, s1.dbt)
+        }
         val s2 = fromDbtWbt(dbt2, s1.wbt)
         return ProcessResult(
             state1 = s1, state2 = s2,

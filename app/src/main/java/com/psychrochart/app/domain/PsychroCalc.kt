@@ -156,7 +156,7 @@ object PsychroCalc {
         val pts = (0..steps).mapNotNull { i ->
             val t = dbtMin + i * (dbtMax - dbtMin) / steps
             val w = humRatioFromRelHum(t, 1.0)
-            if (w in 0.0..0.031) Pair(t, w) else null
+            if (w in 0.0..0.036) Pair(t, w) else null
         }
         return LineData(pts)
     }
@@ -165,7 +165,7 @@ object PsychroCalc {
         val pts = (0..steps).mapNotNull { i ->
             val t = dbtMin + i * (dbtMax - dbtMin) / steps
             val w = humRatioFromRelHum(t, rhFrac)
-            if (w in 0.0..0.031) Pair(t, w) else null
+            if (w in 0.0..0.036) Pair(t, w) else null
         }
         return LineData(pts)
     }
@@ -176,7 +176,7 @@ object PsychroCalc {
             val t = lo + i * (dbtMax - lo) / steps
             if (t < wbt) return@mapNotNull null
             val w = humRatioFromWetBulb(t, wbt)
-            if (w in 0.0..0.031) Pair(t, w) else null
+            if (w in 0.0..0.036) Pair(t, w) else null
         }
         return LineData(pts)
     }
@@ -187,7 +187,7 @@ object PsychroCalc {
             val denom = 2501.0 + 1.86 * t
             if (denom <= 0) return@mapNotNull null
             val w = (hKj - 1.006 * t) / denom
-            if (w in 0.0..0.031) Pair(t, w) else null
+            if (w in 0.0..0.036) Pair(t, w) else null
         }
         return LineData(pts)
     }
@@ -196,7 +196,7 @@ object PsychroCalc {
         val pts = (0..steps).mapNotNull { i ->
             val t = dbtMin + i * (dbtMax - dbtMin) / steps
             val w = humRatioFromSpecVol(t, v)
-            if (w in 0.0..0.031) Pair(t, w) else null
+            if (w in 0.0..0.036) Pair(t, w) else null
         }
         return LineData(pts)
     }
