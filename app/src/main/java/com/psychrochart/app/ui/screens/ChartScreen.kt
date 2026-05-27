@@ -26,8 +26,8 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.drawscope.*
 import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.graphics.layer.rememberGraphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalGraphicsContext
 import androidx.compose.ui.text.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
@@ -61,7 +61,9 @@ fun ChartScreen(vm: MainViewModel) {
     }
 
     // For saving the chart as an image
-    val captureLayer   = rememberGraphicsLayer()
+    val graphicsContext = LocalGraphicsContext.current
+    val captureLayer    = remember { graphicsContext.createGraphicsLayer() }
+    DisposableEffect(captureLayer) { onDispose { graphicsContext.releaseGraphicsLayer(captureLayer) } }
     val coroutineScope = rememberCoroutineScope()
     val context        = LocalContext.current
 
