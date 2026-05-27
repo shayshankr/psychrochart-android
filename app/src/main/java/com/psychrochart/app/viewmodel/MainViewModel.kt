@@ -11,6 +11,7 @@ import com.psychrochart.app.domain.PsychroCalc.fromDbtWbt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 class MainViewModel : ViewModel() {
 
@@ -91,6 +92,35 @@ class MainViewModel : ViewModel() {
             _processError.value = "Process error: ${e.message}"
         }
     }
+
+    // ── Chart layer visibility ─────────────────────────────────────────────────
+
+    data class ChartLayers(
+        val rh: Boolean = true,
+        val wbt: Boolean = false,
+        val enthalpy: Boolean = false,
+        val specVol: Boolean = false,
+    )
+
+    private val _chartLayers = MutableStateFlow(ChartLayers())
+    val chartLayers: StateFlow<ChartLayers> = _chartLayers.asStateFlow()
+
+    fun toggleChartLayer(name: String) {
+        _chartLayers.update { l ->
+            when (name) {
+                "rh"       -> l.copy(rh = !l.rh)
+                "wbt"      -> l.copy(wbt = !l.wbt)
+                "enthalpy" -> l.copy(enthalpy = !l.enthalpy)
+                "specVol"  -> l.copy(specVol = !l.specVol)
+                else       -> l
+            }
+        }
+    }
+
+    private val _selectedPointIdx = MutableStateFlow<Int?>(null)
+    val selectedPointIdx: StateFlow<Int?> = _selectedPointIdx.asStateFlow()
+
+    fun selectChartPoint(idx: Int?) { _selectedPointIdx.value = idx }
 
     // ── Chart state management ─────────────────────────────────────────────────
 

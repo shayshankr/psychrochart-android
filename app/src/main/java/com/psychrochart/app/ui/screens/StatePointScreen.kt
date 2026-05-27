@@ -8,7 +8,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.psychrochart.app.domain.SecondaryInput
@@ -31,86 +33,142 @@ fun StatePointScreen(vm: MainViewModel) {
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text("State Point Calculator", style = MaterialTheme.typography.headlineMedium)
+        Text("State Point Calculator", style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold)
 
-        OutlinedTextField(
-            value = dbtText,
-            onValueChange = { dbtText = it },
-            label = { Text("Dry-Bulb Temperature (°C)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        // ── Input card ─────────────────────────────────────────────────────────
+        Card(
+            shape = MaterialTheme.shapes.large,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("Air Conditions",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-        ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
-            OutlinedTextField(
-                value = secondaryLabel(selected),
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Second Input") },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-                modifier = Modifier.menuAnchor().fillMaxWidth(),
-            )
-            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                SecondaryInput.entries.forEach { opt ->
-                    DropdownMenuItem(
-                        text = { Text(secondaryLabel(opt)) },
-                        onClick = {
-                            selected = opt
-                            secValue = defaultValue(opt)
-                            expanded = false
-                        }
+                // DBT + secondary type side by side
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    OutlinedTextField(
+                        value = dbtText,
+                        onValueChange = { dbtText = it },
+                        label = { Text("DBT (°C)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
                     )
+                    ExposedDropdownMenuBox(
+                        expanded = expanded,
+                        onExpandedChange = { expanded = it },
+                        modifier = Modifier.weight(1.4f),
+                    ) {
+                        OutlinedTextField(
+                            value = secondaryShortLabel(selected),
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("2nd Input") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+                            modifier = Modifier
+                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                                .fillMaxWidth(),
+                            singleLine = true,
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false },
+                        ) {
+                            SecondaryInput.entries.forEach { opt ->
+                                DropdownMenuItem(
+                                    text = { Text(secondaryLabel(opt)) },
+                                    onClick = {
+                                        selected = opt
+                                        secValue = defaultValue(opt)
+                                        expanded = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = secValue,
+                    onValueChange = { secValue = it },
+                    label = { Text("${secondaryLabel(selected)}  (${secondaryUnit(selected)})") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                Button(
+                    onClick = {
+                        val dbt = dbtText.toDoubleOrNull() ?: return@Button
+                        val sec = secValue.toDoubleOrNull() ?: return@Button
+                        vm.calculateState(dbt, selected, sec)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    Icon(Icons.Default.Calculate, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Calculate  &  Plot on Chart")
                 }
             }
         }
 
-        OutlinedTextField(
-            value = secValue,
-            onValueChange = { secValue = it },
-            label = { Text(secondaryLabel(selected) + " — " + secondaryUnit(selected)) },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        Button(
-            onClick = {
-                val dbt = dbtText.toDoubleOrNull() ?: return@Button
-                val sec = secValue.toDoubleOrNull() ?: return@Button
-                vm.calculateState(dbt, selected, sec)
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Icon(Icons.Default.Calculate, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text("Calculate")
-        }
-
-        stateError?.let {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-                Text(it, modifier = Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onErrorContainer)
+        // ── Error ──────────────────────────────────────────────────────────────
+        stateError?.let { err ->
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer),
+                shape = MaterialTheme.shapes.medium,
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(err,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodyMedium)
+                }
             }
         }
 
+        // ── Result ─────────────────────────────────────────────────────────────
         stateResult?.let { state ->
-            StateResultCard(state)
+            StateResultCard(state = state, title = "Calculated State")
         }
     }
 }
 
-private fun secondaryLabel(input: SecondaryInput) = when (input) {
-    SecondaryInput.WBT -> "Wet-Bulb Temperature"
-    SecondaryInput.DPT -> "Dew-Point Temperature"
+internal fun secondaryLabel(input: SecondaryInput) = when (input) {
+    SecondaryInput.WBT -> "Wet-Bulb Temp"
+    SecondaryInput.DPT -> "Dew-Point Temp"
     SecondaryInput.RH  -> "Relative Humidity"
     SecondaryInput.W   -> "Humidity Ratio"
     SecondaryInput.V   -> "Specific Volume"
     SecondaryInput.H   -> "Specific Enthalpy"
 }
 
-private fun secondaryUnit(input: SecondaryInput) = when (input) {
+private fun secondaryShortLabel(input: SecondaryInput) = when (input) {
+    SecondaryInput.WBT -> "WBT"
+    SecondaryInput.DPT -> "DPT"
+    SecondaryInput.RH  -> "RH %"
+    SecondaryInput.W   -> "W kg/kg"
+    SecondaryInput.V   -> "v m³/kg"
+    SecondaryInput.H   -> "h kJ/kg"
+}
+
+internal fun secondaryUnit(input: SecondaryInput) = when (input) {
     SecondaryInput.WBT -> "°C"
     SecondaryInput.DPT -> "°C"
     SecondaryInput.RH  -> "%"
@@ -119,7 +177,7 @@ private fun secondaryUnit(input: SecondaryInput) = when (input) {
     SecondaryInput.H   -> "kJ/kg"
 }
 
-private fun defaultValue(input: SecondaryInput) = when (input) {
+internal fun defaultValue(input: SecondaryInput) = when (input) {
     SecondaryInput.RH  -> "50"
     SecondaryInput.WBT -> "18"
     SecondaryInput.DPT -> "13"

@@ -80,7 +80,7 @@ fun AhuChainScreen(vm: MainViewModel) {
                 readOnly = true,
                 label = { Text("Second Input") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(initSecExp) },
-                modifier = Modifier.menuAnchor().fillMaxWidth(),
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
             )
             ExposedDropdownMenu(expanded = initSecExp, onDismissRequest = { initSecExp = false }) {
                 SecondaryInput.entries.forEach { opt ->
@@ -160,7 +160,7 @@ fun AhuChainScreen(vm: MainViewModel) {
                     readOnly = true,
                     label = { Text("Process Type") },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(stepTypeExp) },
-                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
                 )
                 ExposedDropdownMenu(expanded = stepTypeExp, onDismissRequest = { stepTypeExp = false }) {
                     ProcessType.entries.forEach { pt ->
@@ -468,7 +468,7 @@ private fun AhuProcessParams(
                     readOnly = true,
                     label = { Text("Stream 2 — Second Input") },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(mixSec2Exp) },
-                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
                 )
                 ExposedDropdownMenu(expanded = mixSec2Exp,
                                     onDismissRequest = { onMixSec2Exp(false) }) {

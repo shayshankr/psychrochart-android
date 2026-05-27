@@ -2,14 +2,14 @@ package com.psychrochart.app.ui.navigation
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Analytics
-import androidx.compose.material.icons.filled.CompareArrows
+import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.DeviceHub
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.ui.graphics.vector.ImageVector
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
     data object StatePoint : Screen("state_point", "Calculator", Icons.Default.Thermostat)
-    data object Processes  : Screen("processes",   "Processes",  Icons.Default.CompareArrows)
+    data object Processes  : Screen("processes",   "Processes",  Icons.AutoMirrored.Filled.CompareArrows)
     data object Chart      : Screen("chart",       "Chart",      Icons.Default.Analytics)
     data object AhuChain   : Screen("ahu_chain",   "AHU Chain",  Icons.Default.DeviceHub)
 }

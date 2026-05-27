@@ -67,7 +67,7 @@ fun ProcessScreen(vm: MainViewModel) {
                 readOnly = true,
                 label = { Text("Second input") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(dropIn1) },
-                modifier = Modifier.menuAnchor().fillMaxWidth(),
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
             )
             ExposedDropdownMenu(expanded = dropIn1, onDismissRequest = { dropIn1 = false }) {
                 SecondaryInput.entries.forEach { opt ->
@@ -98,7 +98,7 @@ fun ProcessScreen(vm: MainViewModel) {
                 readOnly = true,
                 label = { Text("Process") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(dropType) },
-                modifier = Modifier.menuAnchor().fillMaxWidth(),
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
             )
             ExposedDropdownMenu(expanded = dropType, onDismissRequest = { dropType = false }) {
                 ProcessType.entries.forEach { pt ->

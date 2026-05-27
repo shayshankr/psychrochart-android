@@ -7,10 +7,15 @@ import android.provider.MediaStore
 import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -26,6 +31,7 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.drawscope.*
 import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalGraphicsContext
 import androidx.compose.ui.text.*
@@ -39,6 +45,7 @@ import com.psychrochart.app.viewmodel.MainViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.hypot
 import kotlin.math.sqrt
 
 private const val DBT_MIN = -10.0
@@ -46,406 +53,653 @@ private const val DBT_MAX =  50.0
 private const val W_MIN   =   0.0
 private const val W_MAX   =   0.030
 
+// Chart margin constants (pixels in canvas space)
+private const val LEFT_PAD   = 106f
+private const val RIGHT_PAD  =  72f
+private const val TOP_PAD    =  52f
+private const val BOTTOM_PAD =  70f
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChartScreen(vm: MainViewModel) {
     val plottedStates by vm.plottedStates.collectAsState()
     val processResult  by vm.processResult.collectAsState()
+    val chartLayers    by vm.chartLayers.collectAsState()
+    val selectedIdx    by vm.selectedPointIdx.collectAsState()
 
     var scale  by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     val textMeasurer = rememberTextMeasurer()
 
+    // Canvas size captured for hit-testing outside DrawScope
+    var canvasW by remember { mutableFloatStateOf(0f) }
+    var canvasH by remember { mutableFloatStateOf(0f) }
+
+    // Coordinate helpers using captured canvas size (for pointer input)
+    fun cToX(dbt: Double): Float {
+        val plotW = canvasW - LEFT_PAD - RIGHT_PAD
+        return (LEFT_PAD + ((dbt - DBT_MIN) / (DBT_MAX - DBT_MIN)) * plotW).toFloat()
+    }
+    fun cToY(w: Double): Float {
+        val plotH = canvasH - TOP_PAD - BOTTOM_PAD
+        return (TOP_PAD + plotH - ((w - W_MIN) / (W_MAX - W_MIN)) * plotH).toFloat()
+    }
+
     val transformState = rememberTransformableState { zoomChange, panChange, _ ->
-        scale  = (scale * zoomChange).coerceIn(0.8f, 8f)
+        scale  = (scale * zoomChange).coerceIn(0.5f, 12f)
         offset = Offset(offset.x + panChange.x * scale, offset.y + panChange.y * scale)
     }
 
-    // For saving the chart as an image
     val graphicsContext = LocalGraphicsContext.current
     val captureLayer    = remember { graphicsContext.createGraphicsLayer() }
     DisposableEffect(captureLayer) { onDispose { graphicsContext.releaseGraphicsLayer(captureLayer) } }
+
     val coroutineScope = rememberCoroutineScope()
     val context        = LocalContext.current
 
-    Box(modifier = Modifier
-        .fillMaxSize()
-        .background(MaterialTheme.colorScheme.background)
-        .drawWithContent {
-            captureLayer.record { this@drawWithContent.drawContent() }
-            drawLayer(captureLayer)
-        }
+    val sheetState = rememberModalBottomSheetState()
+    var showSheet  by remember { mutableStateOf(false) }
+    LaunchedEffect(selectedIdx) { if (selectedIdx != null) showSheet = true }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
     ) {
+        // ── Layer toggle row ───────────────────────────────────────────────────
+        Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+            LazyRow(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                item {
+                    Text(
+                        "Layers:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = chartLayers.rh,
+                        onClick = { vm.toggleChartLayer("rh") },
+                        label = { Text("RH %") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = ChartRH.copy(alpha = 0.18f),
+                            selectedLabelColor = ChartRH,
+                        ),
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = chartLayers.wbt,
+                        onClick = { vm.toggleChartLayer("wbt") },
+                        label = { Text("WBT") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = ChartWBT.copy(alpha = 0.18f),
+                            selectedLabelColor = ChartWBT,
+                        ),
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = chartLayers.enthalpy,
+                        onClick = { vm.toggleChartLayer("enthalpy") },
+                        label = { Text("h (kJ/kg)") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = ChartEnthalpy.copy(alpha = 0.18f),
+                            selectedLabelColor = ChartEnthalpy,
+                        ),
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = chartLayers.specVol,
+                        onClick = { vm.toggleChartLayer("specVol") },
+                        label = { Text("v (m³/kg)") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = ChartSpecVol.copy(alpha = 0.18f),
+                            selectedLabelColor = ChartSpecVol,
+                        ),
+                    )
+                }
+            }
+        }
 
-        Canvas(
+        // ── Chart ──────────────────────────────────────────────────────────────
+        Box(
             modifier = Modifier
-                .fillMaxSize()
-                .transformable(transformState)
-                .graphicsLayer(
-                    scaleX = scale, scaleY = scale,
-                    translationX = offset.x, translationY = offset.y,
+                .weight(1f)
+                .fillMaxWidth()
+                .drawWithContent {
+                    captureLayer.record { this@drawWithContent.drawContent() }
+                    drawLayer(captureLayer)
+                },
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(plottedStates, scale, offset, canvasW, canvasH) {
+                        detectTapGestures { tapPos ->
+                            if (canvasW == 0f) return@detectTapGestures
+                            // Transform tap from screen coords to canvas coords
+                            val cx = (tapPos.x - offset.x) / scale
+                            val cy = (tapPos.y - offset.y) / scale
+                            val hitR = 52f
+                            var hit: Int? = null
+                            var minD = Float.MAX_VALUE
+                            plottedStates.forEachIndexed { i, ps ->
+                                val w = minOf(ps.state.w, PsychroCalc.wSat(ps.state.dbt))
+                                    .coerceIn(W_MIN, W_MAX)
+                                val px = cToX(ps.state.dbt)
+                                val py = cToY(w)
+                                val d  = hypot(cx - px, cy - py)
+                                if (d < hitR && d < minD) { minD = d; hit = i }
+                            }
+                            vm.selectChartPoint(hit)
+                        }
+                    }
+                    .transformable(state = transformState)
+                    .graphicsLayer(
+                        scaleX = scale, scaleY = scale,
+                        translationX = offset.x, translationY = offset.y,
+                    ),
+            ) {
+                canvasW = size.width
+                canvasH = size.height
+
+                val cw    = size.width
+                val ch    = size.height
+                val plotW = cw - LEFT_PAD - RIGHT_PAD
+                val plotH = ch - TOP_PAD  - BOTTOM_PAD
+
+                // Canvas-local coordinate helpers
+                fun toX(dbt: Double) =
+                    (LEFT_PAD + ((dbt - DBT_MIN) / (DBT_MAX - DBT_MIN)) * plotW).toFloat()
+                fun toY(w: Double) =
+                    (TOP_PAD + plotH - ((w - W_MIN) / (W_MAX - W_MIN)) * plotH).toFloat()
+
+                // ── Text styles ────────────────────────────────────────────────
+                val axisLbl    = TextStyle(fontSize = 9.sp,  color = Color(0xFF455A64))
+                val axisTitle  = TextStyle(fontSize = 10.sp, color = Color(0xFF1A252F),
+                                           fontWeight = FontWeight.SemiBold)
+                val tickClr    = Color(0xFF546E7A)
+                val rhLbl      = TextStyle(fontSize = 8.sp,  color = ChartRH,
+                                           fontWeight = FontWeight.SemiBold)
+                val wbtLbl     = TextStyle(fontSize = 7.sp,  color = ChartWBT,
+                                           fontWeight = FontWeight.SemiBold)
+                val hLbl       = TextStyle(fontSize = 7.sp,  color = ChartEnthalpy,
+                                           fontWeight = FontWeight.SemiBold)
+                val vLbl       = TextStyle(fontSize = 7.sp,  color = ChartSpecVol)
+                val rightAxis  = TextStyle(fontSize = 8.sp,  color = Color(0xFF546E7A))
+
+                // ── Plot background ────────────────────────────────────────────
+                drawRect(
+                    Color(0xFFF5F9FF),
+                    topLeft = Offset(LEFT_PAD, TOP_PAD),
+                    size = Size(plotW, plotH),
                 )
-        ) {
-            val cw = size.width
-            val ch = size.height
 
-            // ── Margins ───────────────────────────────────────────────────────
-            val leftPad   = 88f   // Y-axis tick labels + title
-            val rightPad  = 58f   // right g/kg axis labels
-            val topPad    = 44f   // enthalpy labels at top
-            val bottomPad = 64f   // X-axis tick labels + title
-
-            val plotW = cw - leftPad - rightPad
-            val plotH = ch - topPad  - bottomPad
-
-            // ── Coordinate transforms ─────────────────────────────────────────
-            fun toX(dbt: Double) =
-                (leftPad + ((dbt - DBT_MIN) / (DBT_MAX - DBT_MIN)) * plotW).toFloat()
-            fun toY(w: Double) =
-                (topPad + plotH - ((w - W_MIN) / (W_MAX - W_MIN)) * plotH).toFloat()
-
-            // ── Plot background ───────────────────────────────────────────────
-            drawRect(Color(0xFFF5F8FC),
-                topLeft = Offset(leftPad, topPad), size = Size(plotW, plotH))
-
-            // ── Minor grid (every 1 °C / every 0.001 kg/kg) ──────────────────
-            for (t in DBT_MIN.toInt()..DBT_MAX.toInt()) {
-                if (t % 5 == 0) continue
-                val x = toX(t.toDouble())
-                drawLine(Color.Gray.copy(alpha = 0.08f),
-                    Offset(x, topPad), Offset(x, topPad + plotH), 0.5f)
-            }
-            var wv = W_MIN
-            while (wv <= W_MAX + 1e-9) {
-                if ((wv * 1000).toInt() % 5 != 0) {
-                    val y = toY(wv)
-                    drawLine(Color.Gray.copy(alpha = 0.08f),
-                        Offset(leftPad, y), Offset(leftPad + plotW, y), 0.5f)
-                }
-                wv += 0.001
-            }
-
-            // ── Major grid (every 5 °C / every 0.005 kg/kg) ──────────────────
-            for (t in -10..50 step 5) {
-                val x = toX(t.toDouble())
-                drawLine(Color.Gray.copy(alpha = 0.20f),
-                    Offset(x, topPad), Offset(x, topPad + plotH), 0.8f)
-            }
-            for (i in 0..6) {
-                val y = toY(i * 0.005)
-                drawLine(Color.Gray.copy(alpha = 0.20f),
-                    Offset(leftPad, y), Offset(leftPad + plotW, y), 0.8f)
-            }
-
-            // ── Text styles ───────────────────────────────────────────────────
-            val axisLblStyle  = TextStyle(fontSize = 9.sp,   color = Color(0xFF2C3E50))
-            val axisTitleStyle= TextStyle(fontSize = 10.sp,  color = Color(0xFF1A252F),
-                                          fontWeight = FontWeight.SemiBold)
-            val tickDark      = Color(0xFF2C3E50)
-            val rhLblStyle    = TextStyle(fontSize = 7.sp,   color = Color(0xFF1055A8))
-            val wbtLblStyle   = TextStyle(fontSize = 6.sp,   color = Color(0xFF007A38))
-            val hLblStyle     = TextStyle(fontSize = 7.sp,   color = Color(0xFFB50009),
-                                          fontWeight = FontWeight.Medium,
-                                          background = Color(0xFFFFEEEE))
-            val vLblStyle     = TextStyle(fontSize = 6.sp,   color = Color(0xFF7A1DB8))
-            val rightAxisStyle= TextStyle(fontSize = 8.sp,   color = Color(0xFF555555))
-
-            // ── X-axis ticks + labels ─────────────────────────────────────────
-            for (t in -10..50 step 5) {
-                val x = toX(t.toDouble())
-                // Major tick
-                drawLine(tickDark, Offset(x, topPad + plotH), Offset(x, topPad + plotH + 7f), 1.5f)
-                // Label
-                val lbl = "$t"
-                val measured = textMeasurer.measure(lbl, axisLblStyle)
-                drawText(textMeasurer, lbl,
-                    topLeft = Offset(x - measured.size.width / 2f, topPad + plotH + 10f),
-                    style = axisLblStyle)
-            }
-            // Minor X ticks (every 1°C)
-            for (t in DBT_MIN.toInt()..DBT_MAX.toInt()) {
-                if (t % 5 == 0) continue
-                val x = toX(t.toDouble())
-                drawLine(tickDark.copy(alpha = 0.4f),
-                    Offset(x, topPad + plotH), Offset(x, topPad + plotH + 4f), 0.8f)
-            }
-            // X-axis title
-            val xTitle = "Dry-Bulb Temperature  (°C)"
-            val xTitleM = textMeasurer.measure(xTitle, axisTitleStyle)
-            drawText(textMeasurer, xTitle,
-                topLeft = Offset(leftPad + plotW / 2f - xTitleM.size.width / 2f,
-                                 topPad + plotH + 36f),
-                style = axisTitleStyle)
-
-            // ── Y-axis ticks + labels (kg/kg) ─────────────────────────────────
-            for (i in 0..6) {
-                val wVal = i * 0.005
-                val y    = toY(wVal)
-                // Major tick
-                drawLine(tickDark, Offset(leftPad - 7f, y), Offset(leftPad, y), 1.5f)
-                // Label  e.g. "0.010"
-                val lbl     = "%.3f".format(wVal)
-                val measured = textMeasurer.measure(lbl, axisLblStyle)
-                drawText(textMeasurer, lbl,
-                    topLeft = Offset(leftPad - 10f - measured.size.width, y - measured.size.height / 2f),
-                    style = axisLblStyle)
-            }
-            // Minor Y ticks (every 0.001)
-            var wvt = W_MIN
-            while (wvt <= W_MAX + 1e-9) {
-                if ((wvt * 1000).toInt() % 5 != 0) {
-                    val y = toY(wvt)
-                    drawLine(tickDark.copy(alpha = 0.4f),
-                        Offset(leftPad - 4f, y), Offset(leftPad, y), 0.8f)
-                }
-                wvt += 0.001
-            }
-            // Y-axis title (rotated)
-            val yTitle  = "Humidity Ratio  W  (kg/kg dry air)"
-            withTransform({
-                rotate(-90f, pivot = Offset(14f, topPad + plotH / 2f))
-            }) {
-                val yTitleM = textMeasurer.measure(yTitle, axisTitleStyle)
-                drawText(textMeasurer, yTitle,
-                    topLeft = Offset(14f - yTitleM.size.width / 2f,
-                                     topPad + plotH / 2f - yTitleM.size.height / 2f),
-                    style = axisTitleStyle)
-            }
-
-            // ── Right Y-axis: g/kg labels ─────────────────────────────────────
-            for (i in 0..6) {
-                val wVal = i * 0.005
-                val y    = toY(wVal)
-                drawLine(tickDark.copy(alpha = 0.5f),
-                    Offset(leftPad + plotW, y), Offset(leftPad + plotW + 6f, y), 1.2f)
-                val lbl = "${(wVal * 1000).toInt()}"
-                drawText(textMeasurer, lbl,
-                    topLeft = Offset(leftPad + plotW + 9f, y - 7f),
-                    style = rightAxisStyle)
-            }
-            // Right axis title (rotated)
-            val rightTitle = "Humidity Ratio  (g/kg dry air)"
-            withTransform({
-                rotate(90f, pivot = Offset(cw - 12f, topPad + plotH / 2f))
-            }) {
-                val rtM = textMeasurer.measure(rightTitle, rightAxisStyle)
-                drawText(textMeasurer, rightTitle,
-                    topLeft = Offset(cw - 12f - rtM.size.width / 2f,
-                                     topPad + plotH / 2f - rtM.size.height / 2f),
-                    style = rightAxisStyle)
-            }
-
-            // ── Constant RH lines (10 %–90 %) ────────────────────────────────
-            for (rhInt in 10..90 step 10) {
-                val pts = PsychroCalc.constantRhCurve(rhInt / 100.0).points
-                drawChartPath(pts, ChartRH.copy(alpha = 0.65f), 1.8f, ::toX, ::toY)
-                if (pts.isNotEmpty()) {
-                    val last = pts.last()
-                    drawText(textMeasurer, "$rhInt%",
-                        topLeft = Offset(toX(last.first) + 3f, toY(last.second) - 16f),
-                        style = rhLblStyle)
-                }
-            }
-
-            // ── Saturation curve ──────────────────────────────────────────────
-            drawChartPath(PsychroCalc.saturationCurve().points, ChartSaturation, 4f, ::toX, ::toY)
-
-            // ── Constant WBT lines ────────────────────────────────────────────
-            for (wbt in -5..30 step 5) {
-                val pts = PsychroCalc.constantWbtCurve(wbt.toDouble()).points
-                drawChartPath(pts, ChartWBT.copy(alpha = 0.55f), 1.2f, ::toX, ::toY,
-                    dashInterval = 15f)
-                if (pts.isNotEmpty()) {
-                    val first = pts.first()
-                    val ly    = toY(first.second)
-                    // Clamp label inside plot area
-                    val labelY = ly.coerceIn(topPad + 2f, topPad + plotH - 22f)
-                    drawText(textMeasurer, "WBT\n${wbt}°C",
-                        topLeft = Offset(
-                            (toX(first.first) - 24f).coerceAtLeast(leftPad + 2f),
-                            labelY),
-                        style = wbtLblStyle)
-                }
-            }
-
-            // ── Constant enthalpy lines ───────────────────────────────────────
-            for (hKj in -10..120 step 10) {
-                val pts = PsychroCalc.constantEnthalpyCurve(hKj.toDouble()).points
-                drawChartPath(pts, ChartEnthalpy.copy(alpha = 0.50f), 1.0f, ::toX, ::toY,
-                    dashInterval = 10f)
-                if (pts.isNotEmpty()) {
-                    // Label where line enters from top (W_MAX) or from left (DBT_MIN)
-                    val first = pts.first()
-                    val lx = toX(first.first)
-                    val ly = toY(first.second)
-                    if (first.second >= W_MAX - 0.001) {
-                        // enters from top — label above plot
-                        drawText(textMeasurer, "$hKj",
-                            topLeft = Offset(lx - 8f, topPad - 18f),
-                            style = hLblStyle)
-                    } else {
-                        // enters from left — label on left side
-                        drawText(textMeasurer, "$hKj",
-                            topLeft = Offset(leftPad - 30f, ly - 8f),
-                            style = hLblStyle)
+                // ── Grid lines (clipped to plot) ───────────────────────────────
+                clipRect(LEFT_PAD, TOP_PAD, LEFT_PAD + plotW, TOP_PAD + plotH) {
+                    // Minor vertical (every 1 °C)
+                    for (t in DBT_MIN.toInt()..DBT_MAX.toInt()) {
+                        if (t % 5 == 0) continue
+                        val x = toX(t.toDouble())
+                        drawLine(Color.Gray.copy(alpha = 0.07f),
+                            Offset(x, TOP_PAD), Offset(x, TOP_PAD + plotH), 0.5f)
+                    }
+                    // Minor horizontal (every 0.001 kg/kg)
+                    var wv = W_MIN
+                    while (wv <= W_MAX + 1e-9) {
+                        if ((wv * 1000).toInt() % 5 != 0) {
+                            val y = toY(wv)
+                            drawLine(Color.Gray.copy(alpha = 0.07f),
+                                Offset(LEFT_PAD, y), Offset(LEFT_PAD + plotW, y), 0.5f)
+                        }
+                        wv += 0.001
+                    }
+                    // Major vertical (every 5 °C)
+                    for (t in -10..50 step 5) {
+                        val x = toX(t.toDouble())
+                        drawLine(Color.Gray.copy(alpha = 0.18f),
+                            Offset(x, TOP_PAD), Offset(x, TOP_PAD + plotH), 0.7f)
+                    }
+                    // Major horizontal (every 0.005 kg/kg)
+                    for (i in 0..6) {
+                        val y = toY(i * 0.005)
+                        drawLine(Color.Gray.copy(alpha = 0.18f),
+                            Offset(LEFT_PAD, y), Offset(LEFT_PAD + plotW, y), 0.7f)
                     }
                 }
-            }
-            // h-axis label top
-            drawText(textMeasurer, "h (kJ/kg)",
-                topLeft = Offset(leftPad + 4f, topPad - 20f),
-                style = TextStyle(fontSize = 8.sp, color = Color(0xFFB50009),
-                    fontWeight = FontWeight.Bold))
 
-            // ── Constant specific volume lines ────────────────────────────────
-            for (vVal in listOf(0.78, 0.80, 0.82, 0.84, 0.86, 0.88, 0.90, 0.92, 0.94)) {
-                val pts = PsychroCalc.constantSpecVolCurve(vVal).points
-                drawChartPath(pts, ChartSpecVol.copy(alpha = 0.45f), 0.9f, ::toX, ::toY,
-                    dashInterval = 6f)
-                if (pts.isNotEmpty()) {
-                    val first = pts.first()
-                    drawText(textMeasurer, "v=$vVal",
-                        topLeft = Offset(toX(first.first) + 2f, toY(first.second) - 28f),
-                        style = vLblStyle)
-                }
-            }
-
-            // ── Axes border ───────────────────────────────────────────────────
-            drawRect(Color(0xFF2C3E50),
-                topLeft = Offset(leftPad, topPad),
-                size = Size(plotW, plotH),
-                style = Stroke(2f))
-
-            // ── Process arrows ────────────────────────────────────────────────
-            processResult?.let { result ->
-                val x1 = toX(result.state1.dbt); val y1 = toY(result.state1.w)
-                val x2 = toX(result.state2.dbt); val y2 = toY(result.state2.w)
-
-                if (result.processType == ProcessType.HEATING_HUMIDIFICATION) {
-                    // Two-step: horizontal red arrow (sensible heating) then
-                    //           vertical  blue arrow (humidification)
-                    val xMid = x2; val yMid = y1   // corner point
-                    val colorH = Color(0xFFE53935)  // red  – heating leg
-                    val colorW = Color(0xFF1E88E5)  // blue – humidification leg
-                    drawArrowSegment(xMid - x1, yMid - y1, x1, y1, xMid, yMid, colorH)
-                    drawArrowSegment(x2 - xMid, y2 - yMid, xMid, yMid, x2, y2, colorW)
-                    // Label near the corner
-                    drawText(textMeasurer, result.processType.label,
-                        topLeft = Offset(xMid + 6f, yMid - 22f),
-                        style = TextStyle(fontSize = 9.sp, color = Color(0xFF2C3E50),
-                            fontWeight = FontWeight.Bold,
-                            background = Color(0xCCFEF9E7)))
-                } else {
-                    // Single straight arrow with process-type colour
-                    val arrowColor = when (result.processType) {
-                        ProcessType.SENSIBLE_HEATING          -> Color(0xFFE53935)
-                        ProcessType.SENSIBLE_COOLING          -> Color(0xFF1E88E5)
-                        ProcessType.HUMIDIFICATION            -> Color(0xFF1E88E5)
-                        ProcessType.DEHUMIDIFICATION          -> Color(0xFF1E88E5)
-                        ProcessType.COOLING_DEHUMIDIFICATION  -> Color(0xFF1E88E5)
-                        ProcessType.EVAPORATIVE_COOLING       -> Color(0xFF00ACC1)
-                        ProcessType.ADIABATIC_MIXING          -> Color(0xFF8E24AA)
-                        else                                  -> Color(0xFF2C3E50)
+                // ── Chart curves — all clipped to plot area ────────────────────
+                clipRect(LEFT_PAD, TOP_PAD, LEFT_PAD + plotW, TOP_PAD + plotH) {
+                    // Constant RH (10 %–90 %)
+                    if (chartLayers.rh) {
+                        for (rhInt in 10..90 step 10) {
+                            drawChartPath(
+                                PsychroCalc.constantRhCurve(rhInt / 100.0).points,
+                                ChartRH.copy(alpha = 0.70f), 1.5f, ::toX, ::toY,
+                            )
+                        }
                     }
-                    val dx = x2 - x1; val dy = y2 - y1
-                    drawArrowSegment(dx, dy, x1, y1, x2, y2, arrowColor)
-                    drawText(textMeasurer, result.processType.label,
-                        topLeft = Offset((x1 + x2) / 2f + 6f, (y1 + y2) / 2f - 20f),
-                        style = TextStyle(fontSize = 9.sp, color = arrowColor,
-                            fontWeight = FontWeight.Bold,
-                            background = Color(0xCCFEF9E7)))
+                    // Saturation curve — always visible
+                    drawChartPath(
+                        PsychroCalc.saturationCurve().points,
+                        ChartSaturation, 3.5f, ::toX, ::toY,
+                    )
+                    // Constant WBT
+                    if (chartLayers.wbt) {
+                        for (wbt in -5..30 step 5) {
+                            drawChartPath(
+                                PsychroCalc.constantWbtCurve(wbt.toDouble()).points,
+                                ChartWBT.copy(alpha = 0.65f), 1.0f, ::toX, ::toY,
+                                dashInterval = 12f,
+                            )
+                        }
+                    }
+                    // Constant enthalpy
+                    if (chartLayers.enthalpy) {
+                        for (hKj in -10..120 step 10) {
+                            drawChartPath(
+                                PsychroCalc.constantEnthalpyCurve(hKj.toDouble()).points,
+                                ChartEnthalpy.copy(alpha = 0.55f), 0.9f, ::toX, ::toY,
+                                dashInterval = 9f,
+                            )
+                        }
+                    }
+                    // Constant specific volume
+                    if (chartLayers.specVol) {
+                        for (v in listOf(0.78, 0.80, 0.82, 0.84, 0.86, 0.88, 0.90, 0.92, 0.94)) {
+                            drawChartPath(
+                                PsychroCalc.constantSpecVolCurve(v).points,
+                                ChartSpecVol.copy(alpha = 0.50f), 0.9f, ::toX, ::toY,
+                                dashInterval = 5f,
+                            )
+                        }
+                    }
+                    // Process arrow
+                    processResult?.let { result ->
+                        val x1 = toX(result.state1.dbt)
+                        val y1 = toY(result.state1.w.coerceIn(W_MIN, W_MAX))
+                        val x2 = toX(result.state2.dbt)
+                        val y2 = toY(result.state2.w.coerceIn(W_MIN, W_MAX))
+                        if (result.processType == ProcessType.HEATING_HUMIDIFICATION) {
+                            val xMid = x2; val yMid = y1
+                            drawArrowSegment(xMid - x1, 0f, x1, y1, xMid, yMid, Color(0xFFE53935))
+                            drawArrowSegment(0f, y2 - yMid, xMid, yMid, x2, y2, Color(0xFF1E88E5))
+                        } else {
+                            val arrowColor = processArrowColor(result.processType)
+                            drawArrowSegment(x2 - x1, y2 - y1, x1, y1, x2, y2, arrowColor)
+                        }
+                        val lx = (x1 + x2) / 2f + 8f
+                        val ly = (y1 + y2) / 2f - 20f
+                        drawText(
+                            textMeasurer, result.processType.label,
+                            topLeft = Offset(lx, ly),
+                            style = TextStyle(
+                                fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1A252F),
+                                background = Color(0xCCFFFDE7),
+                            ),
+                        )
+                    }
+                }
+
+                // ── X-axis ticks + labels ──────────────────────────────────────
+                for (t in -10..50 step 5) {
+                    val x = toX(t.toDouble())
+                    drawLine(tickClr, Offset(x, TOP_PAD + plotH),
+                        Offset(x, TOP_PAD + plotH + 7f), 1.5f)
+                    val m = textMeasurer.measure("$t", axisLbl)
+                    drawText(textMeasurer, "$t",
+                        topLeft = Offset(x - m.size.width / 2f, TOP_PAD + plotH + 10f),
+                        style = axisLbl)
+                }
+                for (t in DBT_MIN.toInt()..DBT_MAX.toInt()) {
+                    if (t % 5 == 0) continue
+                    val x = toX(t.toDouble())
+                    drawLine(tickClr.copy(alpha = 0.35f),
+                        Offset(x, TOP_PAD + plotH), Offset(x, TOP_PAD + plotH + 4f), 0.8f)
+                }
+                val xTitleM = textMeasurer.measure("Dry-Bulb Temperature  (°C)", axisTitle)
+                drawText(textMeasurer, "Dry-Bulb Temperature  (°C)",
+                    topLeft = Offset(
+                        LEFT_PAD + plotW / 2f - xTitleM.size.width / 2f,
+                        TOP_PAD + plotH + 36f),
+                    style = axisTitle)
+
+                // ── Y-axis (kg/kg) ─────────────────────────────────────────────
+                for (i in 0..6) {
+                    val wVal = i * 0.005
+                    val y = toY(wVal)
+                    drawLine(tickClr, Offset(LEFT_PAD - 7f, y), Offset(LEFT_PAD, y), 1.5f)
+                    val lbl = "%.3f".format(wVal)
+                    val m = textMeasurer.measure(lbl, axisLbl)
+                    drawText(textMeasurer, lbl,
+                        topLeft = Offset(LEFT_PAD - 10f - m.size.width, y - m.size.height / 2f),
+                        style = axisLbl)
+                }
+                var wvt = W_MIN
+                while (wvt <= W_MAX + 1e-9) {
+                    if ((wvt * 1000).toInt() % 5 != 0) {
+                        val y = toY(wvt)
+                        drawLine(tickClr.copy(alpha = 0.35f),
+                            Offset(LEFT_PAD - 4f, y), Offset(LEFT_PAD, y), 0.8f)
+                    }
+                    wvt += 0.001
+                }
+                withTransform({ rotate(-90f, pivot = Offset(14f, TOP_PAD + plotH / 2f)) }) {
+                    val m = textMeasurer.measure("Humidity Ratio  W  (kg/kg dry air)", axisTitle)
+                    drawText(textMeasurer, "Humidity Ratio  W  (kg/kg dry air)",
+                        topLeft = Offset(14f - m.size.width / 2f,
+                            TOP_PAD + plotH / 2f - m.size.height / 2f),
+                        style = axisTitle)
+                }
+
+                // ── Right axis (g/kg) ──────────────────────────────────────────
+                for (i in 0..6) {
+                    val wVal = i * 0.005
+                    val y = toY(wVal)
+                    drawLine(tickClr.copy(alpha = 0.5f),
+                        Offset(LEFT_PAD + plotW, y), Offset(LEFT_PAD + plotW + 6f, y), 1.2f)
+                    val lbl = "${(wVal * 1000).toInt()}"
+                    drawText(textMeasurer, lbl,
+                        topLeft = Offset(LEFT_PAD + plotW + 9f, y - 7f),
+                        style = rightAxis)
+                }
+                withTransform({ rotate(90f, pivot = Offset(cw - 10f, TOP_PAD + plotH / 2f)) }) {
+                    val m = textMeasurer.measure("W  (g/kg dry air)", rightAxis)
+                    drawText(textMeasurer, "W  (g/kg dry air)",
+                        topLeft = Offset(cw - 10f - m.size.width / 2f,
+                            TOP_PAD + plotH / 2f - m.size.height / 2f),
+                        style = rightAxis)
+                }
+
+                // ── Margin labels for chart curves ─────────────────────────────
+                // RH labels — right margin or top margin
+                if (chartLayers.rh) {
+                    for (rhInt in 10..90 step 10) {
+                        val visible = PsychroCalc.constantRhCurve(rhInt / 100.0).points
+                            .filter { (d, w) -> d in DBT_MIN..DBT_MAX && w in W_MIN..W_MAX }
+                        if (visible.isEmpty()) continue
+                        val (lastD, lastW) = visible.last()
+                        val lx = toX(lastD); val ly = toY(lastW)
+                        if (lx > LEFT_PAD + plotW * 0.80f) {
+                            drawText(textMeasurer, "$rhInt%",
+                                topLeft = Offset(LEFT_PAD + plotW + 4f, ly - 6f),
+                                style = rhLbl)
+                        } else {
+                            drawText(textMeasurer, "$rhInt%",
+                                topLeft = Offset(lx - 8f, TOP_PAD - 15f),
+                                style = rhLbl)
+                        }
+                    }
+                }
+                // WBT labels — top margin at saturation-curve intersection
+                if (chartLayers.wbt) {
+                    for (wbt in -5..30 step 5) {
+                        val visible = PsychroCalc.constantWbtCurve(wbt.toDouble()).points
+                            .filter { (d, w) -> d in DBT_MIN..DBT_MAX && w in W_MIN..W_MAX }
+                        if (visible.isEmpty()) continue
+                        val (firstD, _) = visible.first()
+                        drawText(textMeasurer, "${wbt}°",
+                            topLeft = Offset(toX(firstD) - 8f, TOP_PAD - 16f),
+                            style = wbtLbl)
+                    }
+                }
+                // Enthalpy labels — top or left margin
+                if (chartLayers.enthalpy) {
+                    for (hKj in -10..120 step 10) {
+                        val visible = PsychroCalc.constantEnthalpyCurve(hKj.toDouble()).points
+                            .filter { (d, w) -> d in DBT_MIN..DBT_MAX && w in W_MIN..W_MAX }
+                        if (visible.isEmpty()) continue
+                        val (firstD, firstW) = visible.first()
+                        if (firstW >= W_MAX - 0.001) {
+                            drawText(textMeasurer, "$hKj",
+                                topLeft = Offset(toX(firstD) - 8f, TOP_PAD - 15f),
+                                style = hLbl)
+                        } else {
+                            drawText(textMeasurer, "$hKj",
+                                topLeft = Offset(4f, toY(firstW) - 6f),
+                                style = hLbl)
+                        }
+                    }
+                }
+                // SpecVol labels — right or top margin
+                if (chartLayers.specVol) {
+                    for (v in listOf(0.78, 0.80, 0.82, 0.84, 0.86, 0.88, 0.90, 0.92, 0.94)) {
+                        val visible = PsychroCalc.constantSpecVolCurve(v).points
+                            .filter { (d, w) -> d in DBT_MIN..DBT_MAX && w in W_MIN..W_MAX }
+                        if (visible.isEmpty()) continue
+                        val (lastD, lastW) = visible.last()
+                        val lx = toX(lastD); val ly = toY(lastW)
+                        val lbl = "%.2f".format(v)
+                        if (lx > LEFT_PAD + plotW * 0.80f) {
+                            drawText(textMeasurer, lbl,
+                                topLeft = Offset(LEFT_PAD + plotW + 4f, ly - 22f),
+                                style = vLbl)
+                        } else {
+                            drawText(textMeasurer, lbl,
+                                topLeft = Offset(lx - 10f, TOP_PAD - 28f),
+                                style = vLbl)
+                        }
+                    }
+                }
+
+                // ── Axes border ────────────────────────────────────────────────
+                drawRect(
+                    Color(0xFF37474F),
+                    topLeft = Offset(LEFT_PAD, TOP_PAD),
+                    size = Size(plotW, plotH),
+                    style = Stroke(1.5f),
+                )
+
+                // ── State point dots ───────────────────────────────────────────
+                plottedStates.forEachIndexed { i, ps ->
+                    val col      = PointColors[i % PointColors.size]
+                    val px       = toX(ps.state.dbt)
+                    val wClamp   = minOf(ps.state.w, PsychroCalc.wSat(ps.state.dbt))
+                        .coerceIn(W_MIN, W_MAX)
+                    val py       = toY(wClamp)
+                    val selected = i == selectedIdx
+
+                    if (selected) drawCircle(col.copy(alpha = 0.22f), 28f, Offset(px, py))
+                    drawCircle(col, if (selected) 17f else 13f, Offset(px, py))
+                    drawCircle(Color.White, if (selected) 7f else 5f, Offset(px, py))
+                    drawText(
+                        textMeasurer, ps.label,
+                        topLeft = Offset(px + 16f, py - 9f),
+                        style = TextStyle(
+                            fontSize = 8.sp, fontWeight = FontWeight.Bold,
+                            color = col,
+                            background = Color.White.copy(alpha = 0.80f),
+                        ),
+                    )
                 }
             }
 
-            // ── State point dots (no text labels — avoid double labelling) ──────
-            plottedStates.forEachIndexed { i, ps ->
-                val col = PointColors[i % PointColors.size]
-                val cx  = toX(ps.state.dbt)
-                // Clamp W to saturation so the dot never renders outside the chart
-                val wClamped = minOf(ps.state.w, PsychroCalc.wSat(ps.state.dbt))
-                val cy  = toY(wClamped)
-                drawCircle(col, 14f, Offset(cx, cy))
-                drawCircle(Color.White, 6f, Offset(cx, cy))
-            }
-        }
-
-        // ── Legend ────────────────────────────────────────────────────────────
-        Column(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(start = 92.dp, top = 8.dp)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.93f),
-                    RoundedCornerShape(8.dp))
-                .padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            LegendRow(ChartSaturation,  "Saturation (100% RH)", lineWidth = 4.dp)
-            LegendRow(ChartRH,          "Const. RH")
-            LegendRow(ChartWBT,         "Const. WBT",    dashed = true)
-            LegendRow(ChartEnthalpy,    "Const. Enthalpy", dashed = true)
-            LegendRow(ChartSpecVol,     "Const. Sp. Volume", dashed = true)
-        }
-
-        // ── Plotted states list ───────────────────────────────────────────────
-        if (plottedStates.isNotEmpty()) {
+            // ── FABs ──────────────────────────────────────────────────────────
             Column(
                 modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(start = 92.dp, bottom = 70.dp)
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.93f),
-                        RoundedCornerShape(8.dp))
-                    .padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                plottedStates.forEachIndexed { i, ps ->
-                    val col = PointColors[i % PointColors.size]
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(10.dp).background(col, RoundedCornerShape(50)))
-                        Text(
-                            "${ps.label}: ${ps.state.dbt}°C  W=${ps.state.w}  RH=${ps.state.rh}%",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
+                SmallFloatingActionButton(
+                    onClick = {
+                        coroutineScope.launch {
+                            val bmp = captureLayer.toImageBitmap().asAndroidBitmap()
+                            withContext(Dispatchers.IO) { saveChartToGallery(context, bmp) }
+                            Toast.makeText(context, "Chart saved to Gallery", Toast.LENGTH_SHORT)
+                                .show()
+                        }
+                    },
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                ) {
+                    Icon(Icons.Default.SaveAlt, "Save chart as image",
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                }
+                if (plottedStates.isNotEmpty()) {
+                    SmallFloatingActionButton(
+                        onClick = { vm.clearPlottedStates() },
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                    ) {
+                        Icon(Icons.Default.DeleteSweep, "Clear points",
+                            tint = MaterialTheme.colorScheme.onErrorContainer)
+                    }
+                }
+                FloatingActionButton(
+                    onClick = { scale = 1f; offset = Offset.Zero },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                ) {
+                    Icon(Icons.Default.CenterFocusStrong, "Reset zoom",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+            }
+        }
+
+        // ── Plotted points strip ───────────────────────────────────────────────
+        if (plottedStates.isNotEmpty()) {
+            Surface(tonalElevation = 3.dp) {
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    itemsIndexed(plottedStates) { idx, ps ->
+                        val col    = PointColors[idx % PointColors.size]
+                        val isSel  = idx == selectedIdx
+                        FilterChip(
+                            selected = isSel,
+                            onClick  = { vm.selectChartPoint(if (isSel) null else idx) },
+                            label    = {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Box(
+                                        Modifier
+                                            .size(8.dp)
+                                            .background(col, RoundedCornerShape(50)),
+                                    )
+                                    Text(ps.label, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        "%.1f°C  %.0f%%RH".format(ps.state.dbt, ps.state.rh),
+                                        style  = MaterialTheme.typography.labelSmall,
+                                        color  = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = col.copy(alpha = 0.15f),
+                                selectedLabelColor     = MaterialTheme.colorScheme.onSurface,
+                            ),
                         )
                     }
                 }
             }
         }
+    }
 
-        // ── FABs ──────────────────────────────────────────────────────────────
-        Column(
-            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+    // ── Bottom sheet: full state detail ───────────────────────────────────────
+    if (showSheet) {
+        val ps = selectedIdx?.let { plottedStates.getOrNull(it) }
+        if (ps != null) {
+            ModalBottomSheet(
+                onDismissRequest = { showSheet = false; vm.selectChartPoint(null) },
+                sheetState = sheetState,
+            ) {
+                val col = PointColors[(selectedIdx ?: 0) % PointColors.size]
+                StateDetailSheet(ps, col)
+            }
+        } else {
+            showSheet = false
+        }
+    }
+}
+
+@Composable
+private fun StateDetailSheet(ps: MainViewModel.PlottedState, color: Color) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 32.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // Save chart as PNG
-            SmallFloatingActionButton(
-                onClick = {
-                    coroutineScope.launch {
-                        val bitmap = captureLayer.toImageBitmap().asAndroidBitmap()
-                        withContext(Dispatchers.IO) {
-                            saveChartToGallery(context, bitmap)
+            Box(Modifier.size(16.dp).background(color, RoundedCornerShape(50)))
+            Text(ps.label, style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold)
+        }
+        HorizontalDivider()
+
+        val props = listOf(
+            "DBT" to "%.1f °C".format(ps.state.dbt),
+            "WBT" to "%.1f °C".format(ps.state.wbt),
+            "DPT" to "%.1f °C".format(ps.state.dpt),
+            "RH"  to "%.1f %%".format(ps.state.rh),
+            "W"   to "%.5f\nkg/kg".format(ps.state.w),
+            "h"   to "%.2f\nkJ/kg".format(ps.state.h),
+            "v"   to "%.4f\nm³/kg".format(ps.state.v),
+            "Pv"  to "%.3f\nkPa".format(ps.state.pv),
+            "μ"   to "%.4f".format(ps.state.mu),
+        )
+        props.chunked(3).forEach { rowItems ->
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                rowItems.forEach { (label, value) ->
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        colors   = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(value,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface)
                         }
-                        Toast.makeText(context, "Chart saved to Gallery", Toast.LENGTH_SHORT).show()
                     }
                 }
-            ) {
-                Icon(Icons.Default.SaveAlt, "Save chart as image")
-            }
-
-            if (plottedStates.isNotEmpty()) {
-                SmallFloatingActionButton(onClick = { vm.clearPlottedStates() }) {
-                    Icon(Icons.Default.DeleteSweep, "Clear points")
-                }
-            }
-            FloatingActionButton(onClick = { scale = 1f; offset = Offset.Zero }) {
-                Icon(Icons.Default.CenterFocusStrong, "Reset zoom")
+                repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
 }
 
-// ── Canvas helpers ─────────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
-/** Draw a line from (x1,y1) to (x2,y2) with an arrowhead at (x2,y2). */
+private fun processArrowColor(type: ProcessType) = when (type) {
+    ProcessType.SENSIBLE_HEATING         -> Color(0xFFE53935)
+    ProcessType.SENSIBLE_COOLING         -> Color(0xFF1E88E5)
+    ProcessType.HUMIDIFICATION           -> Color(0xFF43A047)
+    ProcessType.DEHUMIDIFICATION         -> Color(0xFF1565C0)
+    ProcessType.COOLING_DEHUMIDIFICATION -> Color(0xFF039BE5)
+    ProcessType.EVAPORATIVE_COOLING      -> Color(0xFF00ACC1)
+    ProcessType.ADIABATIC_MIXING         -> Color(0xFF8E24AA)
+    else                                 -> Color(0xFF37474F)
+}
+
 private fun DrawScope.drawArrowSegment(
     dx: Float, dy: Float,
     x1: Float, y1: Float,
@@ -465,30 +719,6 @@ private fun DrawScope.drawArrowSegment(
         lineTo(hx - px * hw, hy - py * hw)
         close()
     }, color)
-}
-
-/** Save [bitmap] to the device's Pictures/PsychroChart folder via MediaStore. */
-private fun saveChartToGallery(context: android.content.Context, bitmap: android.graphics.Bitmap) {
-    val filename = "PsychroChart_${System.currentTimeMillis()}.png"
-    val values = ContentValues().apply {
-        put(MediaStore.Images.Media.DISPLAY_NAME, filename)
-        put(MediaStore.Images.Media.MIME_TYPE,    "image/png")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            put(MediaStore.Images.Media.RELATIVE_PATH,
-                Environment.DIRECTORY_PICTURES + "/PsychroChart")
-            put(MediaStore.Images.Media.IS_PENDING, 1)
-        }
-    }
-    val uri = context.contentResolver.insert(
-        MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return
-    context.contentResolver.openOutputStream(uri)?.use { out ->
-        bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
-    }
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        values.clear()
-        values.put(MediaStore.Images.Media.IS_PENDING, 0)
-        context.contentResolver.update(uri, values, null, null)
-    }
 }
 
 private fun DrawScope.drawChartPath(
@@ -511,25 +741,25 @@ private fun DrawScope.drawChartPath(
         else Stroke(strokeWidth))
 }
 
-@Composable
-private fun LegendRow(
-    color: Color,
-    label: String,
-    dashed: Boolean = false,
-    lineWidth: Dp = 2.dp,
-) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Canvas(modifier = Modifier.size(width = 18.dp, height = 10.dp)) {
-            val y = size.height / 2f
-            drawLine(
-                color, Offset(0f, y), Offset(size.width, y),
-                strokeWidth = lineWidth.toPx(),
-                pathEffect = if (dashed)
-                    PathEffect.dashPathEffect(floatArrayOf(6f, 4f)) else null,
-            )
+private fun saveChartToGallery(context: android.content.Context, bitmap: android.graphics.Bitmap) {
+    val filename = "PsychroChart_${System.currentTimeMillis()}.png"
+    val values = ContentValues().apply {
+        put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+        put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            put(MediaStore.Images.Media.RELATIVE_PATH,
+                Environment.DIRECTORY_PICTURES + "/PsychroChart")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
         }
-        Text(label, style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface)
+    }
+    val uri = context.contentResolver.insert(
+        MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return
+    context.contentResolver.openOutputStream(uri)?.use { out ->
+        bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        values.clear()
+        values.put(MediaStore.Images.Media.IS_PENDING, 0)
+        context.contentResolver.update(uri, values, null, null)
     }
 }
