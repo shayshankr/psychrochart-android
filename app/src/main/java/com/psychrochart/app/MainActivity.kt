@@ -3,6 +3,7 @@
 package com.psychrochart.app
 
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -15,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.DeviceHub
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -40,8 +42,33 @@ import com.psychrochart.app.ui.screens.StatePointScreen
 import com.psychrochart.app.ui.theme.PsychroChartTheme
 import com.psychrochart.app.viewmodel.MainViewModel
 
-private const val PREFS_NAME = "psychro_prefs"
-private const val KEY_ONBOARDED = "onboarded"
+private const val PREFS_NAME       = "psychro_prefs"
+private const val KEY_ONBOARDED    = "onboarded"
+private const val KEY_LAST_VERSION = "last_version_code"
+
+// ── Changelog ─────────────────────────────────────────────────────────────────
+
+private data class VersionEntry(val version: String, val changes: List<String>)
+
+private val changelog = listOf(
+    VersionEntry("12.0.0", listOf(
+        "In-app onboarding guide shown on first launch",
+        "Help sheet accessible anytime via the info icon in the toolbar",
+        "What's New screen shown automatically after each update",
+    )),
+    VersionEntry("11.0.0", listOf(
+        "Fixed 4 critical bugs in AHU chain and psychrometric calculations",
+        "Improved accuracy of enthalpy, humidity ratio, and saturation curve",
+    )),
+    VersionEntry("10.0.0", listOf(
+        "Redesigned chart with toggleable RH, WBT, Enthalpy, and Specific Volume layers",
+        "Curves clipped cleanly to plot area with edge labels",
+        "Tap any point on the chart to inspect all psychrometric properties",
+        "Pinch-to-zoom and pan gesture support",
+    )),
+)
+
+// ── Activity ──────────────────────────────────────────────────────────────────
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -57,10 +84,29 @@ class MainActivity : ComponentActivity() {
 
                 var showHelp       by remember { mutableStateOf(false) }
                 var showOnboarding by remember { mutableStateOf(false) }
+                var showWhatsNew   by remember { mutableStateOf(false) }
 
                 LaunchedEffect(Unit) {
                     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    if (!prefs.getBoolean(KEY_ONBOARDED, false)) showOnboarding = true
+                    val pkg = context.packageManager.getPackageInfo(context.packageName, 0)
+                    val currentCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
+                        pkg.longVersionCode.toInt()
+                    else
+                        @Suppress("DEPRECATION") pkg.versionCode
+
+                    when {
+                        !prefs.getBoolean(KEY_ONBOARDED, false) -> {
+                            showOnboarding = true
+                            prefs.edit()
+                                .putBoolean(KEY_ONBOARDED, true)
+                                .putInt(KEY_LAST_VERSION, currentCode)
+                                .apply()
+                        }
+                        currentCode > prefs.getInt(KEY_LAST_VERSION, 0) -> {
+                            showWhatsNew = true
+                            prefs.edit().putInt(KEY_LAST_VERSION, currentCode).apply()
+                        }
+                    }
                 }
 
                 Scaffold(
@@ -129,27 +175,32 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         confirmButton = {
-                            Button(onClick = {
-                                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                                    .edit().putBoolean(KEY_ONBOARDED, true).apply()
-                                showOnboarding = false
-                            }) {
+                            Button(onClick = { showOnboarding = false }) {
                                 Text("Got it!")
                             }
                         }
                     )
                 }
 
+                // ── What's New bottom sheet ────────────────────────────────────
+                if (showWhatsNew) {
+                    ModalBottomSheet(onDismissRequest = { showWhatsNew = false }) {
+                        WhatsNewSheetContent()
+                    }
+                }
+
                 // ── Help bottom sheet ──────────────────────────────────────────
                 if (showHelp) {
                     ModalBottomSheet(onDismissRequest = { showHelp = false }) {
-                        HelpSheetContent()
+                        HelpSheetContent(onShowWhatsNew = { showHelp = false; showWhatsNew = true })
                     }
                 }
             }
         }
     }
 }
+
+// ── Onboarding ────────────────────────────────────────────────────────────────
 
 @Composable
 private fun OnboardingStep(number: String, tab: String, description: String) {
@@ -178,8 +229,10 @@ private fun OnboardingStep(number: String, tab: String, description: String) {
     }
 }
 
+// ── What's New ────────────────────────────────────────────────────────────────
+
 @Composable
-private fun HelpSheetContent() {
+private fun WhatsNewSheetContent() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -188,9 +241,91 @@ private fun HelpSheetContent() {
             .padding(bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        Text("How to use PsychroChart",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.NewReleases,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(26.dp))
+            Text("What's New",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold)
+        }
+        HorizontalDivider()
+
+        changelog.forEachIndexed { index, entry ->
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(entry.version,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary)
+                    if (index == 0) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Text("LATEST",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                entry.changes.forEach { change ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Text("•",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold)
+                        Text(change,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            if (index < changelog.lastIndex) HorizontalDivider(thickness = 0.5.dp)
+        }
+    }
+}
+
+// ── Help ──────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun HelpSheetContent(onShowWhatsNew: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("How to use PsychroChart",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold)
+            TextButton(onClick = onShowWhatsNew) {
+                Icon(Icons.Default.NewReleases,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("What's New", style = MaterialTheme.typography.labelMedium)
+            }
+        }
         HorizontalDivider()
         HelpSection(
             icon = Icons.Default.Thermostat,
