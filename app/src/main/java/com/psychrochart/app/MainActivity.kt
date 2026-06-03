@@ -1,14 +1,29 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.psychrochart.app
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.CompareArrows
+import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.DeviceHub
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material3.*
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -25,6 +40,9 @@ import com.psychrochart.app.ui.screens.StatePointScreen
 import com.psychrochart.app.ui.theme.PsychroChartTheme
 import com.psychrochart.app.viewmodel.MainViewModel
 
+private const val PREFS_NAME = "psychro_prefs"
+private const val KEY_ONBOARDED = "onboarded"
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,9 +53,33 @@ class MainActivity : ComponentActivity() {
                 val vm: MainViewModel = viewModel()
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentDestination = navBackStackEntry?.destination
+                val context = LocalContext.current
+
+                var showHelp       by remember { mutableStateOf(false) }
+                var showOnboarding by remember { mutableStateOf(false) }
+
+                LaunchedEffect(Unit) {
+                    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    if (!prefs.getBoolean(KEY_ONBOARDED, false)) showOnboarding = true
+                }
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
+                    topBar = {
+                        TopAppBar(
+                            title = { Text("PsychroChart", fontWeight = FontWeight.Bold) },
+                            actions = {
+                                IconButton(onClick = { showHelp = true }) {
+                                    Icon(Icons.Default.Info, contentDescription = "How to use")
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            ),
+                        )
+                    },
                     bottomBar = {
                         NavigationBar {
                             bottomNavScreens.forEach { screen ->
@@ -68,6 +110,156 @@ class MainActivity : ComponentActivity() {
                         composable(Screen.AhuChain.route)   { AhuChainScreen(vm) }
                     }
                 }
+
+                // ── First-launch onboarding dialog ─────────────────────────────
+                if (showOnboarding) {
+                    AlertDialog(
+                        onDismissRequest = {},
+                        title = { Text("Welcome to PsychroChart", fontWeight = FontWeight.Bold) },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                OnboardingStep("1", "Calculator",
+                                    "Enter Dry-Bulb Temp + a second input (RH, WBT, etc.), then tap Calculate & Plot.")
+                                OnboardingStep("2", "Chart",
+                                    "See your point on the chart. Toggle layers, pinch to zoom, tap a dot to inspect.")
+                                OnboardingStep("3", "Processes",
+                                    "Simulate HVAC processes (heating, cooling, mixing). Results auto-plot on the chart.")
+                                OnboardingStep("4", "AHU Chain",
+                                    "Chain multiple processes and view a full before/after summary table.")
+                            }
+                        },
+                        confirmButton = {
+                            Button(onClick = {
+                                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                                    .edit().putBoolean(KEY_ONBOARDED, true).apply()
+                                showOnboarding = false
+                            }) {
+                                Text("Got it!")
+                            }
+                        }
+                    )
+                }
+
+                // ── Help bottom sheet ──────────────────────────────────────────
+                if (showHelp) {
+                    ModalBottomSheet(onDismissRequest = { showHelp = false }) {
+                        HelpSheetContent()
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OnboardingStep(number: String, tab: String, description: String) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.primary,
+            shape = MaterialTheme.shapes.small,
+        ) {
+            Text(
+                number,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimary,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(tab, fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyMedium)
+            Text(description, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun HelpSheetContent() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        Text("How to use PsychroChart",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold)
+        HorizontalDivider()
+        HelpSection(
+            icon = Icons.Default.Thermostat,
+            title = "Calculator",
+            steps = listOf(
+                "Enter Dry-Bulb Temperature (°C)",
+                "Choose a second input: RH, WBT, DPT, W, v, or h",
+                "Enter the second value",
+                "Tap \"Calculate & Plot on Chart\"",
+            )
+        )
+        HelpSection(
+            icon = Icons.Default.Analytics,
+            title = "Chart",
+            steps = listOf(
+                "Toggle curve layers: RH lines, Wet-Bulb, Enthalpy, Specific Volume",
+                "Pinch to zoom in/out, drag to pan",
+                "Tap any plotted dot to inspect all psychrometric properties",
+                "Use the Save button (bottom-right) to export the chart as PNG",
+            )
+        )
+        HelpSection(
+            icon = Icons.AutoMirrored.Filled.CompareArrows,
+            title = "Processes",
+            steps = listOf(
+                "Set the initial air state (DBT + secondary input)",
+                "Choose a process type (Sensible Cooling, Humidification, etc.)",
+                "Enter the target parameters",
+                "Tap \"Run Process\" — result plots automatically on Chart",
+            )
+        )
+        HelpSection(
+            icon = Icons.Default.DeviceHub,
+            title = "AHU Chain",
+            steps = listOf(
+                "Set initial supply air conditions and tap Set Initial State",
+                "Add process steps one by one using Add Step",
+                "View the chain flow diagram and before/after summary table",
+                "Tap Reset Chain to start over",
+            )
+        )
+    }
+}
+
+@Composable
+private fun HelpSection(icon: ImageVector, title: String, steps: List<String>) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp))
+            Text(title, style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold)
+        }
+        steps.forEachIndexed { i, step ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Text("${i + 1}.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold)
+                Text(step,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
