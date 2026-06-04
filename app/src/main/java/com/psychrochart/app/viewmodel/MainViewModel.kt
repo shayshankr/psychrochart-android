@@ -57,13 +57,15 @@ class MainViewModel : ViewModel() {
         param2: Double? = null,
         param3: Double? = null,
         useW: Boolean = true,
+        param4: Double? = null,
+        mixSec2: SecondaryInput = SecondaryInput.W,
     ) {
         runCatching {
             when (processType) {
                 ProcessType.SENSIBLE_HEATING ->
-                    Processes.sensibleHeating(s1, param1)
+                    Processes.sensibleHeating(s1, param1, param2)
                 ProcessType.SENSIBLE_COOLING ->
-                    Processes.sensibleCooling(s1, param1)
+                    Processes.sensibleCooling(s1, param1, param2)
                 ProcessType.HUMIDIFICATION ->
                     if (useW) Processes.humidification(s1, w2 = param1)
                     else Processes.humidification(s1, rh2Pct = param1)
@@ -71,16 +73,23 @@ class MainViewModel : ViewModel() {
                     if (useW) Processes.dehumidification(s1, w2 = param1)
                     else Processes.dehumidification(s1, rh2Pct = param1)
                 ProcessType.COOLING_DEHUMIDIFICATION ->
-                    if (useW) Processes.coolingDehumidification(s1, param1, w2 = param2)
-                    else Processes.coolingDehumidification(s1, param1, rh2Pct = param2)
+                    if (useW) Processes.coolingDehumidification(s1, param1, w2 = param2, mDot = param3)
+                    else Processes.coolingDehumidification(s1, param1, rh2Pct = param2, mDot = param3)
                 ProcessType.HEATING_HUMIDIFICATION ->
                     if (useW) Processes.heatingHumidification(s1, param1, w2 = param2)
                     else Processes.heatingHumidification(s1, param1, rh2Pct = param2)
                 ProcessType.EVAPORATIVE_COOLING ->
                     Processes.evaporativeCooling(s1, param1)
                 ProcessType.ADIABATIC_MIXING -> {
-                    val s2 = fromDbtW(param1, param2!!)
-                    Processes.adiabaticMixing(s1, s2, param3 ?: 1.0, 1.0)
+                    val s2 = when (mixSec2) {
+                        SecondaryInput.WBT -> fromDbtWbt(param1, param2!!)
+                        SecondaryInput.DPT -> fromDbtDpt(param1, param2!!)
+                        SecondaryInput.RH  -> fromDbtRh(param1, param2!!)
+                        SecondaryInput.W   -> fromDbtW(param1, param2!!)
+                        SecondaryInput.V   -> fromDbtV(param1, param2!!)
+                        SecondaryInput.H   -> fromDbtH(param1, param2!!)
+                    }
+                    Processes.adiabaticMixing(s1, s2, param3 ?: 1.0, param4 ?: 1.0)
                 }
             }
         }.onSuccess { result ->

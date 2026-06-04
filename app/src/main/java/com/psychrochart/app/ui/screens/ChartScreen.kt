@@ -335,17 +335,22 @@ fun ChartScreen(vm: MainViewModel) {
                             val arrowColor = processArrowColor(result.processType)
                             drawArrowSegment(x2 - x1, y2 - y1, x1, y1, x2, y2, arrowColor)
                         }
-                        val lx = (x1 + x2) / 2f + 8f
-                        val ly = (y1 + y2) / 2f - 20f
-                        drawText(
-                            textMeasurer, result.processType.label,
-                            topLeft = Offset(lx, ly),
-                            style = TextStyle(
-                                fontSize = 9.sp, fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1A252F),
-                                background = Color(0xCCFFFDE7),
-                            ),
+                        val lx = (x1 + x2) / 2f
+                        val ly = (y1 + y2) / 2f
+                        val procStyle = TextStyle(
+                            fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                            color = Color(0xFF1A252F),
+                            background = Color(0xCCFFFDE7),
                         )
+                        val pm = textMeasurer.measure(result.processType.label, procStyle)
+                        val procLabelCy = ly - 18f - pm.size.width / 2f
+                        withTransform({ rotate(90f, pivot = Offset(lx, procLabelCy)) }) {
+                            drawText(
+                                textMeasurer, result.processType.label,
+                                topLeft = Offset(lx - pm.size.width / 2f, procLabelCy - pm.size.height / 2f),
+                                style = procStyle,
+                            )
+                        }
                     }
                 }
 
@@ -392,7 +397,7 @@ fun ChartScreen(vm: MainViewModel) {
                     }
                     wvt += 0.001
                 }
-                withTransform({ rotate(-90f, pivot = Offset(14f, TOP_PAD + plotH / 2f)) }) {
+                withTransform({ rotate(90f, pivot = Offset(14f, TOP_PAD + plotH / 2f)) }) {
                     val m = textMeasurer.measure("Humidity Ratio  W  (kg/kg dry air)", axisTitle)
                     drawText(textMeasurer, "Humidity Ratio  W  (kg/kg dry air)",
                         topLeft = Offset(14f - m.size.width / 2f,
@@ -510,15 +515,20 @@ fun ChartScreen(vm: MainViewModel) {
                     if (selected) drawCircle(col.copy(alpha = 0.22f), 28f, Offset(px, py))
                     drawCircle(col, if (selected) 17f else 13f, Offset(px, py))
                     drawCircle(Color.White, if (selected) 7f else 5f, Offset(px, py))
-                    drawText(
-                        textMeasurer, ps.label,
-                        topLeft = Offset(px + 16f, py - 9f),
-                        style = TextStyle(
-                            fontSize = 8.sp, fontWeight = FontWeight.Bold,
-                            color = col,
-                            background = Color.White.copy(alpha = 0.80f),
-                        ),
+                    val lblStyle = TextStyle(
+                        fontSize = 8.sp, fontWeight = FontWeight.Bold,
+                        color = col,
+                        background = Color.White.copy(alpha = 0.80f),
                     )
+                    val lm = textMeasurer.measure(ps.label, lblStyle)
+                    val lblCy = py - 20f - lm.size.width / 2f
+                    withTransform({ rotate(90f, pivot = Offset(px, lblCy)) }) {
+                        drawText(
+                            textMeasurer, ps.label,
+                            topLeft = Offset(px - lm.size.width / 2f, lblCy - lm.size.height / 2f),
+                            style = lblStyle,
+                        )
+                    }
                 }
             }
 

@@ -37,7 +37,9 @@ fun ProcessScreen(vm: MainViewModel) {
     var param1 by remember { mutableStateOf("20") }
     var param2 by remember { mutableStateOf("40") }
     var param3 by remember { mutableStateOf("1.0") }
+    var param4 by remember { mutableStateOf("1.0") }
     var useW   by remember { mutableStateOf(false) }
+    var secIn2Mix by remember { mutableStateOf(SecondaryInput.W) }
 
     Column(
         modifier = Modifier
@@ -113,7 +115,8 @@ fun ProcessScreen(vm: MainViewModel) {
         // ── Process parameters (dynamic) ──────────────────────────────────────
         SectionLabel("Process Parameters")
         ProcessParams(processType, param1, { param1 = it }, param2, { param2 = it },
-            param3, { param3 = it }, useW, { useW = it })
+            param3, { param3 = it }, useW, { useW = it },
+            param4, { param4 = it }, secIn2Mix, { secIn2Mix = it })
 
         // ── Run button ─────────────────────────────────────────────────────────
         Button(
@@ -123,8 +126,9 @@ fun ProcessScreen(vm: MainViewModel) {
                 val p1   = param1.toDoubleOrNull() ?: return@Button
                 val p2   = param2.toDoubleOrNull()
                 val p3   = param3.toDoubleOrNull()
+                val p4   = param4.toDoubleOrNull()
                 val s1 = buildState(vm, dbt, secIn1, sec) ?: return@Button
-                vm.runProcess(processType, s1, p1, p2, p3, useW)
+                vm.runProcess(processType, s1, p1, p2, p3, useW, p4, secIn2Mix)
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -154,6 +158,7 @@ private fun SectionLabel(text: String) {
         modifier = Modifier.padding(top = 4.dp))
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProcessParams(
     type: ProcessType,
@@ -161,9 +166,14 @@ private fun ProcessParams(
     p2: String, onP2: (String) -> Unit,
     p3: String, onP3: (String) -> Unit,
     useW: Boolean, onUseW: (Boolean) -> Unit,
+    p4: String = "1.0", onP4: (String) -> Unit = {},
+    secIn2: SecondaryInput = SecondaryInput.W, onSecIn2: (SecondaryInput) -> Unit = {},
 ) {
     when (type) {
-        ProcessType.SENSIBLE_HEATING, ProcessType.SENSIBLE_COOLING,
+        ProcessType.SENSIBLE_HEATING, ProcessType.SENSIBLE_COOLING -> {
+            NumberField("Final DBT (°C)", p1, onP1)
+            NumberField("Total air quantity (kg/s)", p2, onP2)
+        }
         ProcessType.EVAPORATIVE_COOLING -> {
             NumberField("Final DBT (°C)", p1, onP1)
         }
@@ -172,16 +182,43 @@ private fun ProcessParams(
             if (useW) NumberField("Final W (kg/kg)", p1, onP1)
             else      NumberField("Final RH (%)", p1, onP1)
         }
-        ProcessType.COOLING_DEHUMIDIFICATION, ProcessType.HEATING_HUMIDIFICATION -> {
+        ProcessType.COOLING_DEHUMIDIFICATION -> {
+            NumberField("Final DBT (°C)", p1, onP1)
+            WOrRhToggle(useW, onUseW)
+            if (useW) NumberField("Final W (kg/kg)", p2, onP2)
+            else      NumberField("Final RH (%)", p2, onP2)
+            NumberField("Total air quantity (kg/s)", p3, onP3)
+        }
+        ProcessType.HEATING_HUMIDIFICATION -> {
             NumberField("Final DBT (°C)", p1, onP1)
             WOrRhToggle(useW, onUseW)
             if (useW) NumberField("Final W (kg/kg)", p2, onP2)
             else      NumberField("Final RH (%)", p2, onP2)
         }
         ProcessType.ADIABATIC_MIXING -> {
+            var dropIn2 by remember { mutableStateOf(false) }
             NumberField("State 2 — DBT (°C)", p1, onP1)
-            NumberField("State 2 — W (kg/kg)", p2, onP2)
+            ExposedDropdownMenuBox(expanded = dropIn2, onExpandedChange = { dropIn2 = it }) {
+                OutlinedTextField(
+                    value = secInputLabel(secIn2),
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("State 2 — second input") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(dropIn2) },
+                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                )
+                ExposedDropdownMenu(expanded = dropIn2, onDismissRequest = { dropIn2 = false }) {
+                    listOf(SecondaryInput.WBT, SecondaryInput.DPT, SecondaryInput.W, SecondaryInput.H).forEach { opt ->
+                        DropdownMenuItem(
+                            text = { Text(secInputLabel(opt)) },
+                            onClick = { onSecIn2(opt); dropIn2 = false }
+                        )
+                    }
+                }
+            }
+            NumberField("State 2 — ${secInputLabel(secIn2)} (${secInputUnit(secIn2)})", p2, onP2)
             NumberField("Mass flow m₁ (kg/s)", p3, onP3)
+            NumberField("Mass flow m₂ (kg/s)", p4, onP4)
         }
     }
 }

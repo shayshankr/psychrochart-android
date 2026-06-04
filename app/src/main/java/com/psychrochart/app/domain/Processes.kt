@@ -6,36 +6,40 @@ import com.psychrochart.app.domain.PsychroCalc.fromDbtWbt
 
 object Processes {
 
-    fun sensibleHeating(s1: PsychroState, dbt2: Double): ProcessResult {
+    fun sensibleHeating(s1: PsychroState, dbt2: Double, mDot: Double? = null): ProcessResult {
         require(dbt2 > s1.dbt) {
             "Sensible heating target DBT (%.1f°C) must be greater than inlet DBT (%.1f°C)".format(dbt2, s1.dbt)
         }
         val s2 = fromDbtW(dbt2, s1.w)
-        return ProcessResult(
-            state1 = s1, state2 = s2,
-            processType = ProcessType.SENSIBLE_HEATING,
-            metrics = mapOf(
-                "Heat Added (kJ/kg dry air)" to "%.3f".format(s2.h - s1.h),
-                "ΔT (°C)"                   to "%.2f".format(dbt2 - s1.dbt),
-                "W constant (kg/kg)"        to "%.6f".format(s1.w),
-            )
+        val metrics = mutableMapOf(
+            "Heat Added (kJ/kg dry air)" to "%.3f".format(s2.h - s1.h),
+            "ΔT (°C)"                   to "%.2f".format(dbt2 - s1.dbt),
+            "W constant (kg/kg)"        to "%.6f".format(s1.w),
         )
+        if (mDot != null) {
+            val kw = (s2.h - s1.h) * mDot
+            metrics["Total Load (kW)"] = "%.3f".format(kw)
+            metrics["Total Load (TR)"] = "%.3f".format(kw / 3.5169)
+        }
+        return ProcessResult(state1 = s1, state2 = s2, processType = ProcessType.SENSIBLE_HEATING, metrics = metrics)
     }
 
-    fun sensibleCooling(s1: PsychroState, dbt2: Double): ProcessResult {
+    fun sensibleCooling(s1: PsychroState, dbt2: Double, mDot: Double? = null): ProcessResult {
         require(dbt2 < s1.dbt) {
             "Sensible cooling target DBT (%.1f°C) must be less than inlet DBT (%.1f°C)".format(dbt2, s1.dbt)
         }
         val s2 = fromDbtW(dbt2, s1.w)
-        return ProcessResult(
-            state1 = s1, state2 = s2,
-            processType = ProcessType.SENSIBLE_COOLING,
-            metrics = mapOf(
-                "Heat Removed (kJ/kg dry air)" to "%.3f".format(s1.h - s2.h),
-                "ΔT (°C)"                      to "%.2f".format(s1.dbt - dbt2),
-                "W constant (kg/kg)"           to "%.6f".format(s1.w),
-            )
+        val metrics = mutableMapOf(
+            "Heat Removed (kJ/kg dry air)" to "%.3f".format(s1.h - s2.h),
+            "ΔT (°C)"                      to "%.2f".format(s1.dbt - dbt2),
+            "W constant (kg/kg)"           to "%.6f".format(s1.w),
         )
+        if (mDot != null) {
+            val kw = (s1.h - s2.h) * mDot
+            metrics["Total Load (kW)"] = "%.3f".format(kw)
+            metrics["Total Load (TR)"] = "%.3f".format(kw / 3.5169)
+        }
+        return ProcessResult(state1 = s1, state2 = s2, processType = ProcessType.SENSIBLE_COOLING, metrics = metrics)
     }
 
     fun humidification(s1: PsychroState, w2: Double? = null, rh2Pct: Double? = null): ProcessResult {
@@ -64,7 +68,7 @@ object Processes {
         )
     }
 
-    fun coolingDehumidification(s1: PsychroState, dbt2: Double, w2: Double? = null, rh2Pct: Double? = null): ProcessResult {
+    fun coolingDehumidification(s1: PsychroState, dbt2: Double, w2: Double? = null, rh2Pct: Double? = null, mDot: Double? = null): ProcessResult {
         val s2 = if (w2 != null) fromDbtW(dbt2, w2) else fromDbtRh(dbt2, rh2Pct!!)
         val totalHeat = s1.h - s2.h
         val deltaW    = s1.w - s2.w
@@ -72,16 +76,18 @@ object Processes {
         // ensures Sensible + Latent = Total exactly (avoids the 1.86*ΔW*ΔT rounding gap)
         val sensible  = 1.006 * (s1.dbt - s2.dbt) + 1.86 * (s1.w * s1.dbt - s2.w * s2.dbt)
         val latent    = totalHeat - sensible
-        return ProcessResult(
-            state1 = s1, state2 = s2,
-            processType = ProcessType.COOLING_DEHUMIDIFICATION,
-            metrics = mapOf(
-                "Total Heat Removed (kJ/kg)"    to "%.3f".format(totalHeat),
-                "Sensible Heat Removed (kJ/kg)" to "%.3f".format(sensible),
-                "Latent Heat Removed (kJ/kg)"   to "%.3f".format(latent),
-                "Moisture Removed (kg/kg)"      to "%.6f".format(deltaW),
-            )
+        val metrics = mutableMapOf(
+            "Total Heat Removed (kJ/kg)"    to "%.3f".format(totalHeat),
+            "Sensible Heat Removed (kJ/kg)" to "%.3f".format(sensible),
+            "Latent Heat Removed (kJ/kg)"   to "%.3f".format(latent),
+            "Moisture Removed (kg/kg)"      to "%.6f".format(deltaW),
         )
+        if (mDot != null) {
+            val kw = totalHeat * mDot
+            metrics["Total Load (kW)"] = "%.3f".format(kw)
+            metrics["Total Load (TR)"] = "%.3f".format(kw / 3.5169)
+        }
+        return ProcessResult(state1 = s1, state2 = s2, processType = ProcessType.COOLING_DEHUMIDIFICATION, metrics = metrics)
     }
 
     fun heatingHumidification(s1: PsychroState, dbt2: Double, w2: Double? = null, rh2Pct: Double? = null): ProcessResult {
