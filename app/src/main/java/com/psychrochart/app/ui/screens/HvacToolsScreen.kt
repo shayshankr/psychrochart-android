@@ -3,6 +3,7 @@
 package com.psychrochart.app.ui.screens
 
 import androidx.compose.foundation.horizontalScroll
+import kotlin.math.ceil
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -22,7 +23,7 @@ import com.psychrochart.app.viewmodel.MainViewModel
 
 @Composable
 fun HvacToolsScreen(vm: MainViewModel) {
-    val tabs = listOf("SHR / Loads", "Ventilation", "Property Table", "Cooling Tower")
+    val tabs = listOf("SHR / Loads", "Ventilation", "Property Table", "Cooling Tower", "Duct Sizing")
     var selectedTab by remember { mutableIntStateOf(0) }
 
     Column(Modifier.fillMaxSize()) {
@@ -41,6 +42,7 @@ fun HvacToolsScreen(vm: MainViewModel) {
                 1 -> VentilationTab(vm)
                 2 -> PropertyTableTab()
                 3 -> CoolingTowerTab(vm)
+                4 -> DuctSizingTab()
             }
         }
     }
@@ -473,5 +475,202 @@ private fun ErrorCard(msg: String) {
             modifier = Modifier.padding(12.dp),
             color = MaterialTheme.colorScheme.onErrorContainer,
             style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+// ── Tab 5: Duct Sizing ────────────────────────────────────────────────────────
+
+@Composable
+private fun DuctSizingTab() {
+    val unitSystem by AppSettings.unitSystem.collectAsState()
+    val isIp = unitSystem == UnitSystem.IP
+
+    val flowUnit = if (isIp) "CFM"           else "L/s"
+    val fricUnit = if (isIp) "inH₂O/100ft"   else "Pa/m"
+    val velUnit  = if (isIp) "FPM"            else "m/s"
+    val dimUnit  = if (isIp) "in"             else "mm"
+
+    var isRound      by remember { mutableStateOf(true) }
+    var isEqFriction by remember { mutableStateOf(true) }
+    var airflowText  by remember { mutableStateOf(if (isIp) "1000" else "500") }
+    var frictionText by remember { mutableStateOf(if (isIp) "0.10" else "0.80") }
+    var velocityText by remember { mutableStateOf(if (isIp) "1000" else "5.0") }
+    var aspectRatio  by remember { mutableStateOf(1.5) }
+    var arExpanded   by remember { mutableStateOf(false) }
+    var result       by remember { mutableStateOf<DuctSizingResult?>(null) }
+    var error        by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(unitSystem) {
+        airflowText  = if (isIp) "1000" else "500"
+        frictionText = if (isIp) "0.10" else "0.80"
+        velocityText = if (isIp) "1000" else "5.0"
+        result = null; error = null
+    }
+
+    val aspectRatios = listOf(
+        1.0 to "1:1 (square)", 1.25 to "1.25:1", 1.5 to "1.5:1",
+        2.0 to "2:1", 2.5 to "2.5:1", 3.0 to "3:1", 4.0 to "4:1",
+    )
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("Duct Sizing Calculator",
+            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("Size supply/return/exhaust ducts by equal friction or target velocity. Standard air at 20 °C, galvanized steel (ε = 0.09 mm).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        // Shape
+        HvacSectionLabel("Duct Shape")
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            SegmentedButton(shape = SegmentedButtonDefaults.itemShape(0, 2),
+                onClick = { isRound = true; result = null }, selected = isRound) { Text("Round") }
+            SegmentedButton(shape = SegmentedButtonDefaults.itemShape(1, 2),
+                onClick = { isRound = false; result = null }, selected = !isRound) { Text("Rectangular") }
+        }
+
+        // Method
+        HvacSectionLabel("Sizing Method")
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            SegmentedButton(shape = SegmentedButtonDefaults.itemShape(0, 2),
+                onClick = { isEqFriction = true; result = null }, selected = isEqFriction) { Text("Equal Friction") }
+            SegmentedButton(shape = SegmentedButtonDefaults.itemShape(1, 2),
+                onClick = { isEqFriction = false; result = null }, selected = !isEqFriction) { Text("Velocity") }
+        }
+
+        // Inputs
+        HvacSectionLabel("Inputs")
+        HvacField("Airflow ($flowUnit)", airflowText, { airflowText = it })
+
+        if (isEqFriction) {
+            HvacField("Design Friction Rate ($fricUnit)", frictionText, { frictionText = it })
+            Text(if (isIp) "Typical: 0.08–0.15 inH₂O/100ft" else "Typical: 0.8–1.2 Pa/m",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            HvacField("Design Velocity ($velUnit)", velocityText, { velocityText = it })
+            Text(if (isIp) "Main: 1000–1600 FPM  ·  Branch: 600–1000 FPM  ·  Near terminal: 400–600 FPM"
+                 else      "Main: 5–8 m/s  ·  Branch: 3–5 m/s  ·  Near terminal: 2–3 m/s",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        if (!isRound) {
+            HvacSectionLabel("Aspect Ratio (W : H)")
+            ExposedDropdownMenuBox(expanded = arExpanded, onExpandedChange = { arExpanded = it }) {
+                OutlinedTextField(
+                    value = aspectRatios.find { it.first == aspectRatio }?.second ?: "1.5:1",
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Aspect Ratio") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(arExpanded) },
+                    modifier = Modifier
+                        .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                        .fillMaxWidth(),
+                )
+                ExposedDropdownMenu(expanded = arExpanded, onDismissRequest = { arExpanded = false }) {
+                    aspectRatios.forEach { (r, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = { aspectRatio = r; arExpanded = false; result = null },
+                        )
+                    }
+                }
+            }
+        }
+
+        Button(
+            onClick = {
+                error = null; result = null
+                val q  = airflowText.toDoubleOrNull()
+                val fr = frictionText.toDoubleOrNull()
+                val v  = velocityText.toDoubleOrNull()
+                if (q == null)                    { error = "Invalid airflow value.";       return@Button }
+                if (isEqFriction && fr == null)   { error = "Invalid friction rate value."; return@Button }
+                if (!isEqFriction && v == null)   { error = "Invalid velocity value.";      return@Button }
+                val qSi  = if (isIp) q  * 4.71947e-4 else q  * 1e-3
+                val frSi = if (isIp) (fr ?: 0.0) * 8.172  else fr ?: 0.0
+                val vSi  = if (isIp) (v  ?: 0.0) * 5.08e-3 else v ?: 0.0
+                result = runCatching {
+                    when {
+                        isRound  && isEqFriction  -> DuctSizer.solveRoundEqualFriction(qSi, frSi)
+                        isRound  && !isEqFriction -> DuctSizer.solveRoundVelocity(qSi, vSi)
+                        !isRound && isEqFriction  -> DuctSizer.solveRectEqualFriction(qSi, frSi, aspectRatio)
+                        else                      -> DuctSizer.solveRectVelocity(qSi, vSi, aspectRatio)
+                    }
+                }.onFailure { e -> error = e.message ?: "Calculation error." }.getOrNull()
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Default.Calculate, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Calculate Duct Size")
+        }
+
+        error?.let { ErrorCard(it) }
+
+        result?.let { r ->
+            val velMs = r.velocityMs
+            val velCategory = when {
+                velMs < 2.0  -> "Very low — risk of dust settling"
+                velMs < 3.0  -> "Low (near terminal / exhaust)"
+                velMs < 5.0  -> "Good (branch duct)"
+                velMs < 8.0  -> "Good (main duct)"
+                velMs < 10.0 -> "High — check for noise"
+                else         -> "Too high — noise & pressure issues"
+            }
+            val velColor = when {
+                velMs < 2.0 || velMs >= 10.0 -> MaterialTheme.colorScheme.error
+                velMs in 8.0..10.0           -> MaterialTheme.colorScheme.tertiary
+                else                         -> MaterialTheme.colorScheme.primary
+            }
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Results", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    HorizontalDivider()
+
+                    if (r.isRound) {
+                        val diamDisp = if (isIp) r.diameterMm / 25.4 else r.diameterMm
+                        HvacResultRow("Duct Diameter", "%.1f $dimUnit".format(diamDisp))
+                        if (!isIp) {
+                            val nextStd = (ceil(r.diameterMm / 25.0) * 25).toInt()
+                            HvacResultRow("Next 25 mm standard", "$nextStd mm")
+                        }
+                    } else {
+                        val wDisp  = if (isIp) r.widthMm!!         / 25.4 else r.widthMm!!
+                        val hDisp  = if (isIp) r.heightMm!!        / 25.4 else r.heightMm!!
+                        val dhDisp = if (isIp) r.hydraulicDiamMm!! / 25.4 else r.hydraulicDiamMm!!
+                        val deDisp = if (isIp) r.diameterMm        / 25.4 else r.diameterMm
+                        HvacResultRow("Duct Size (W × H)",       "%.0f × %.0f $dimUnit".format(wDisp, hDisp))
+                        HvacResultRow("Hydraulic Diameter",      "%.1f $dimUnit".format(dhDisp))
+                        HvacResultRow("Equivalent Round (De)",   "%.1f $dimUnit".format(deDisp))
+                    }
+
+                    HorizontalDivider()
+                    val velDisp = if (isIp) velMs * 196.85        else velMs
+                    val frDisp  = if (isIp) r.frictionPaPerM / 8.172 else r.frictionPaPerM
+                    HvacResultRow("Air Velocity",    "%.1f $velUnit".format(velDisp))
+                    HvacResultRow("Friction Loss",   "%.3f $fricUnit".format(frDisp))
+                    HvacResultRow("Reynolds Number", "%.0f".format(r.reynoldsNumber))
+                    HorizontalDivider()
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Velocity Assessment",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                            modifier = Modifier.weight(1f))
+                        Text(velCategory,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = velColor)
+                    }
+                }
+            }
+        }
     }
 }
