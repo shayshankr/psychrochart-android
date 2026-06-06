@@ -35,7 +35,8 @@ fun StatePointScreen(vm: MainViewModel) {
     var pointLabel by remember { mutableStateOf("") }
     var showCityPicker    by remember { mutableStateOf(false) }
     var citySearch        by remember { mutableStateOf("") }
-    var citySeasonSummer  by remember { mutableStateOf(true) }
+    // 0 = Summer, 1 = Monsoon/DP, 2 = Winter
+    var citySeasonMode by remember { mutableIntStateOf(0) }
 
     // Re-init DBT default when unit system changes
     LaunchedEffect(unitSystem) {
@@ -198,8 +199,8 @@ fun StatePointScreen(vm: MainViewModel) {
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
-                            selected = citySeasonSummer,
-                            onClick  = { citySeasonSummer = true },
+                            selected = citySeasonMode == 0,
+                            onClick  = { citySeasonMode = 0 },
                             label    = { Text("Summer") },
                             colors   = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = Color(0xFFE53935).copy(alpha = 0.15f),
@@ -207,8 +208,17 @@ fun StatePointScreen(vm: MainViewModel) {
                             ),
                         )
                         FilterChip(
-                            selected = !citySeasonSummer,
-                            onClick  = { citySeasonSummer = false },
+                            selected = citySeasonMode == 1,
+                            onClick  = { citySeasonMode = 1 },
+                            label    = { Text("Monsoon") },
+                            colors   = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFF43A047).copy(alpha = 0.15f),
+                                selectedLabelColor     = Color(0xFF43A047),
+                            ),
+                        )
+                        FilterChip(
+                            selected = citySeasonMode == 2,
+                            onClick  = { citySeasonMode = 2 },
                             label    = { Text("Winter") },
                             colors   = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = Color(0xFF1E88E5).copy(alpha = 0.15f),
@@ -217,10 +227,11 @@ fun StatePointScreen(vm: MainViewModel) {
                         )
                     }
                     Text(
-                        if (citySeasonSummer)
-                            "1% cooling — fills DBT + coincident WBT (${uc.tempUnit(unitSystem)})"
-                        else
-                            "99.6% heating — fills DBT (${uc.tempUnit(unitSystem)}) + RH 80%",
+                        when (citySeasonMode) {
+                            0    -> "1% cooling — fills DBT + coincident WBT (${uc.tempUnit(unitSystem)})"
+                            1    -> "1% dew-point — fills coincident DBT + DPT (${uc.tempUnit(unitSystem)})"
+                            else -> "99.6% heating — fills DBT (${uc.tempUnit(unitSystem)}) + RH 80%"
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -232,25 +243,41 @@ fun StatePointScreen(vm: MainViewModel) {
                             val sumDBT = uc.displayTemp(city.summerDbt, unitSystem)
                             val sumWBT = uc.displayTemp(city.summerWbt, unitSystem)
                             val winDBT = uc.displayTemp(city.winterDbt, unitSystem)
+                            val monDP  = uc.displayTemp(city.dehumidDpt, unitSystem)
+                            val monDBT = uc.displayTemp(city.dehumidDbt, unitSystem)
                             val tU = uc.tempUnit(unitSystem)
                             ListItem(
                                 headlineContent = { Text(city.name, fontWeight = FontWeight.Medium) },
                                 supportingContent = {
                                     Text(
-                                        "Summer: %.0f/%.0f %s  Winter: %.0f %s  Alt: %.0f m"
-                                            .format(sumDBT, sumWBT, tU, winDBT, tU, city.altitudeM),
+                                        when (citySeasonMode) {
+                                            0    -> "Sum: %.0f/%.0f %s  Win: %.0f %s  Alt: %.0f m"
+                                                        .format(sumDBT, sumWBT, tU, winDBT, tU, city.altitudeM)
+                                            1    -> "DP: %.0f %s  DBT: %.0f %s  Alt: %.0f m"
+                                                        .format(monDP, tU, monDBT, tU, city.altitudeM)
+                                            else -> "Win: %.0f %s  Sum: %.0f %s  Alt: %.0f m"
+                                                        .format(winDBT, tU, sumDBT, tU, city.altitudeM)
+                                        },
                                         style = MaterialTheme.typography.labelSmall,
                                     )
                                 },
                                 modifier = Modifier.clickable {
-                                    if (citySeasonSummer) {
-                                        dbtText  = uc.defaultTemp(city.summerDbt, unitSystem)
-                                        secValue = uc.defaultTemp(city.summerWbt, unitSystem)
-                                        selected = SecondaryInput.WBT
-                                    } else {
-                                        dbtText  = uc.defaultTemp(city.winterDbt, unitSystem)
-                                        secValue = "80"
-                                        selected = SecondaryInput.RH
+                                    when (citySeasonMode) {
+                                        0 -> {
+                                            dbtText  = uc.defaultTemp(city.summerDbt, unitSystem)
+                                            secValue = uc.defaultTemp(city.summerWbt, unitSystem)
+                                            selected = SecondaryInput.WBT
+                                        }
+                                        1 -> {
+                                            dbtText  = uc.defaultTemp(city.dehumidDbt, unitSystem)
+                                            secValue = uc.defaultTemp(city.dehumidDpt, unitSystem)
+                                            selected = SecondaryInput.DPT
+                                        }
+                                        else -> {
+                                            dbtText  = uc.defaultTemp(city.winterDbt, unitSystem)
+                                            secValue = "80"
+                                            selected = SecondaryInput.RH
+                                        }
                                     }
                                     AppSettings.setAltitude(city.altitudeM)
                                     showCityPicker = false
