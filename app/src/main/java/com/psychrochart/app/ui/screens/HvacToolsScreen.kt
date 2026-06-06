@@ -351,11 +351,12 @@ private fun CoolingTowerTab(vm: MainViewModel) {
 
     var enteringTemp by remember { mutableStateOf(uc.defaultTemp(35.0, unitSystem)) }
     var ambientWbt   by remember { mutableStateOf(uc.defaultTemp(24.0, unitSystem)) }
-    var approach     by remember { mutableStateOf("5.0") }
+    var approach     by remember { mutableStateOf(if (unitSystem == UnitSystem.IP) "9.0" else "5.0") }
 
     LaunchedEffect(unitSystem) {
         enteringTemp = uc.defaultTemp(35.0, unitSystem)
         ambientWbt   = uc.defaultTemp(24.0, unitSystem)
+        approach     = if (unitSystem == UnitSystem.IP) "9.0" else "5.0"
     }
 
     Column(
@@ -376,17 +377,18 @@ private fun CoolingTowerTab(vm: MainViewModel) {
         HvacSectionLabel("Inputs")
         HvacField("Entering Hot Water Temp ($tUnit)", enteringTemp, { enteringTemp = it })
         HvacField("Ambient Wet-Bulb Temp ($tUnit)", ambientWbt, { ambientWbt = it })
-        HvacField("Desired Approach (Δ°C)", approach, { approach = it })
+        HvacField("Desired Approach (Δ$tUnit)", approach, { approach = it })
 
         Button(
             onClick = {
                 val ewt = enteringTemp.toDoubleOrNull() ?: return@Button
                 val wbt = ambientWbt.toDoubleOrNull()   ?: return@Button
                 val app = approach.toDoubleOrNull()     ?: return@Button
+                val appSi = if (unitSystem == UnitSystem.IP) app * 5.0 / 9.0 else app
                 vm.calculateCoolingTower(
                     uc.inputTemp(ewt, unitSystem),
                     uc.inputTemp(wbt, unitSystem),
-                    app,
+                    appSi,
                 )
             },
             modifier = Modifier.fillMaxWidth(),
@@ -410,8 +412,12 @@ private fun CoolingTowerTab(vm: MainViewModel) {
                     HvacResultRow("Leaving Water Temp",
                         "%.1f $tUnit".format(uc.displayTemp(r.leavingWaterTemp, unitSystem)))
                     HorizontalDivider()
-                    HvacResultRow("Range (ΔT)",         "%.1f °C".format(r.range))
-                    HvacResultRow("Approach",            "%.1f °C".format(r.approach))
+                    val displayDelta = { deltaC: Double ->
+                        val v = if (unitSystem == UnitSystem.IP) deltaC * 9.0 / 5.0 else deltaC
+                        "%.1f Δ$tUnit".format(v)
+                    }
+                    HvacResultRow("Range (ΔT)",  displayDelta(r.range))
+                    HvacResultRow("Approach",    displayDelta(r.approach))
                     HvacResultRow("Effectiveness",       "%.1f %%".format(r.effectiveness * 100))
                 }
             }

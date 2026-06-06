@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package com.psychrochart.app.ui.screens
 
 import android.content.ContentValues
@@ -368,9 +370,8 @@ fun ChartScreen(vm: MainViewModel) {
                         val x2 = toX(result.state2.dbt)
                         val y2 = toY(result.state2.w.coerceIn(W_MIN, W_MAX))
                         if (result.processType == ProcessType.HEATING_HUMIDIFICATION) {
-                            val xMid = x2; val yMid = y1
-                            drawArrowSegment(xMid - x1, 0f, x1, y1, xMid, yMid, Color(0xFFE53935))
-                            drawArrowSegment(0f, y2 - yMid, xMid, yMid, x2, y2, Color(0xFF1E88E5))
+                            drawArrowSegment(x2 - x1, 0f, x1, y1, x2, y1, Color(0xFFE53935))
+                            drawArrowSegment(0f, y2 - y1, x2, y1, x2, y2, Color(0xFF1E88E5))
                         } else {
                             val arrowColor = processArrowColor(result.processType)
                             drawArrowSegment(x2 - x1, y2 - y1, x1, y1, x2, y2, arrowColor)
@@ -675,7 +676,7 @@ fun ChartScreen(vm: MainViewModel) {
                 sheetState = sheetState,
             ) {
                 val col = PointColors[(selectedIdx ?: 0) % PointColors.size]
-                StateDetailSheet(ps, col)
+                StateDetailSheet(ps, col, unitSystem)
             }
         } else {
             showSheet = false
@@ -684,7 +685,12 @@ fun ChartScreen(vm: MainViewModel) {
 }
 
 @Composable
-private fun StateDetailSheet(ps: MainViewModel.PlottedState, color: Color) {
+private fun StateDetailSheet(
+    ps: MainViewModel.PlottedState,
+    color: Color,
+    unitSystem: UnitSystem,
+) {
+    val uc = UnitConverter
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -703,15 +709,21 @@ private fun StateDetailSheet(ps: MainViewModel.PlottedState, color: Color) {
         }
         HorizontalDivider()
 
+        val tU = uc.tempUnit(unitSystem)
+        val isIp = unitSystem == UnitSystem.IP
         val props = listOf(
-            "DBT" to "%.1f °C".format(ps.state.dbt),
-            "WBT" to "%.1f °C".format(ps.state.wbt),
-            "DPT" to "%.1f °C".format(ps.state.dpt),
+            "DBT" to "%.1f %s".format(uc.displayTemp(ps.state.dbt, unitSystem), tU),
+            "WBT" to "%.1f %s".format(uc.displayTemp(ps.state.wbt, unitSystem), tU),
+            "DPT" to "%.1f %s".format(uc.displayTemp(ps.state.dpt, unitSystem), tU),
             "RH"  to "%.1f %%".format(ps.state.rh),
-            "W"   to "%.5f\nkg/kg".format(ps.state.w),
-            "h"   to "%.2f\nkJ/kg".format(ps.state.h),
-            "v"   to "%.4f\nm³/kg".format(ps.state.v),
-            "Pv"  to "%.3f\nkPa".format(ps.state.pv),
+            "W"   to if (isIp) "%.1f\ngr/lb".format(uc.kgkgToGrLb(ps.state.w))
+                     else       "%.5f\nkg/kg".format(ps.state.w),
+            "h"   to if (isIp) "%.2f\nBTU/lb".format(uc.kjkgToBtuLb(ps.state.h))
+                     else       "%.2f\nkJ/kg".format(ps.state.h),
+            "v"   to if (isIp) "%.4f\nft³/lb".format(uc.m3kgToFt3Lb(ps.state.v))
+                     else       "%.4f\nm³/kg".format(ps.state.v),
+            "Pv"  to if (isIp) "%.4f\npsi".format(uc.kPaToPsi(ps.state.pv))
+                     else       "%.3f\nkPa".format(ps.state.pv),
             "μ"   to "%.4f".format(ps.state.mu),
         )
         props.chunked(3).forEach { rowItems ->
@@ -772,13 +784,13 @@ private fun DrawScope.drawArrowSegment(
     if (len < 5f) return
     drawLine(color, Offset(x1, y1), Offset(x2, y2), 3f)
     val ux = dx / len; val uy = dy / len
-    val px = -uy;      val py =  ux
+    val px = -uy
     val headLen = 18f; val hw = 8f
     val hx = x2 - ux * headLen; val hy = y2 - uy * headLen
     drawPath(Path().apply {
         moveTo(x2, y2)
-        lineTo(hx + px * hw, hy + py * hw)
-        lineTo(hx - px * hw, hy - py * hw)
+        lineTo(hx + px * hw, hy + ux * hw)
+        lineTo(hx - px * hw, hy - ux * hw)
         close()
     }, color)
 }

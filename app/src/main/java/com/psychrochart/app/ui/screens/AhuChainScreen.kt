@@ -289,7 +289,7 @@ fun AhuChainScreen(vm: MainViewModel) {
                             style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                         Text("RH\nin→out", modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                        Text("h\nin→out", modifier = Modifier.weight(1.2f),
+                        Text("h (${uc.hUnit(unitSystem)})\nin→out", modifier = Modifier.weight(1.2f),
                             style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                     }
                     HorizontalDivider()
@@ -310,7 +310,9 @@ fun AhuChainScreen(vm: MainViewModel) {
                             Text("%.0f→%.0f%%".format(step.stateIn.rh, step.stateOut.rh),
                                 modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.bodySmall)
-                            Text("%.1f→%.1f".format(step.stateIn.h, step.stateOut.h),
+                            Text("%.1f→%.1f".format(
+                                uc.displayH(step.stateIn.h, unitSystem),
+                                uc.displayH(step.stateOut.h, unitSystem)),
                                 modifier = Modifier.weight(1.2f),
                                 style = MaterialTheme.typography.bodySmall)
                         }
