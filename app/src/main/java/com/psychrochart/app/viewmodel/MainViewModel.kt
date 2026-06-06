@@ -97,7 +97,7 @@ class MainViewModel : ViewModel() {
                     Processes.coolingCoil(s1, param1, param2 ?: 0.10, param3, us)
                 ProcessType.ENERGY_RECOVERY -> {
                     val exhaustState = buildSecondaryState(param1, mixSec2, param2!!)
-                    Processes.energyRecovery(s1, exhaustState, param3 ?: 0.70, param4 ?: 0.60, us)
+                    Processes.energyRecovery(s1, exhaustState, param3 ?: 0.70, param4 ?: 0.60, unitSystem = us)
                 }
             }
         }.onSuccess { result ->
@@ -267,7 +267,7 @@ class MainViewModel : ViewModel() {
                     Processes.coolingCoil(currentIn, param1, param2 ?: 0.10, param3, us)
                 ProcessType.ENERGY_RECOVERY -> {
                     val exhaustState = buildSecondaryState(mixDbt2, mixSec2, mixSec2Val)
-                    Processes.energyRecovery(currentIn, exhaustState, param1, param2 ?: 0.60, us)
+                    Processes.energyRecovery(currentIn, exhaustState, param1, param2 ?: 0.60, unitSystem = us)
                 }
             }
         }.onSuccess { result ->
