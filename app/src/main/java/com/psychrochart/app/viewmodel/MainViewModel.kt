@@ -66,37 +66,38 @@ class MainViewModel : ViewModel() {
         param4: Double? = null,
         mixSec2: SecondaryInput = SecondaryInput.W,
     ) {
+        val us = AppSettings.unitSystem.value
         runCatching {
             when (processType) {
                 ProcessType.SENSIBLE_HEATING ->
-                    Processes.sensibleHeating(s1, param1, param2)
+                    Processes.sensibleHeating(s1, param1, param2, us)
                 ProcessType.SENSIBLE_COOLING ->
-                    Processes.sensibleCooling(s1, param1, param2)
+                    Processes.sensibleCooling(s1, param1, param2, us)
                 ProcessType.HUMIDIFICATION ->
-                    if (useW) Processes.humidification(s1, w2 = param1)
-                    else      Processes.humidification(s1, rh2Pct = param1)
+                    if (useW) Processes.humidification(s1, w2 = param1, unitSystem = us)
+                    else      Processes.humidification(s1, rh2Pct = param1, unitSystem = us)
                 ProcessType.DEHUMIDIFICATION ->
-                    if (useW) Processes.dehumidification(s1, w2 = param1)
-                    else      Processes.dehumidification(s1, rh2Pct = param1)
+                    if (useW) Processes.dehumidification(s1, w2 = param1, unitSystem = us)
+                    else      Processes.dehumidification(s1, rh2Pct = param1, unitSystem = us)
                 ProcessType.COOLING_DEHUMIDIFICATION ->
-                    if (useW) Processes.coolingDehumidification(s1, param1, w2 = param2, mDot = param3)
-                    else      Processes.coolingDehumidification(s1, param1, rh2Pct = param2, mDot = param3)
+                    if (useW) Processes.coolingDehumidification(s1, param1, w2 = param2, mDot = param3, unitSystem = us)
+                    else      Processes.coolingDehumidification(s1, param1, rh2Pct = param2, mDot = param3, unitSystem = us)
                 ProcessType.HEATING_HUMIDIFICATION ->
-                    if (useW) Processes.heatingHumidification(s1, param1, w2 = param2)
-                    else      Processes.heatingHumidification(s1, param1, rh2Pct = param2)
+                    if (useW) Processes.heatingHumidification(s1, param1, w2 = param2, unitSystem = us)
+                    else      Processes.heatingHumidification(s1, param1, rh2Pct = param2, unitSystem = us)
                 ProcessType.EVAPORATIVE_COOLING ->
-                    Processes.evaporativeCooling(s1, param1)
+                    Processes.evaporativeCooling(s1, param1, us)
                 ProcessType.ADIABATIC_MIXING -> {
                     val s2 = buildSecondaryState(param1, mixSec2, param2!!)
-                    Processes.adiabaticMixing(s1, s2, param3 ?: 1.0, param4 ?: 1.0)
+                    Processes.adiabaticMixing(s1, s2, param3 ?: 1.0, param4 ?: 1.0, us)
                 }
                 ProcessType.FAN_HEAT_RISE ->
-                    Processes.fanHeatRise(s1, param1, param2 ?: 70.0, param3)
+                    Processes.fanHeatRise(s1, param1, param2 ?: 70.0, param3, us)
                 ProcessType.COOLING_COIL ->
-                    Processes.coolingCoil(s1, param1, param2 ?: 0.10, param3)
+                    Processes.coolingCoil(s1, param1, param2 ?: 0.10, param3, us)
                 ProcessType.ENERGY_RECOVERY -> {
                     val exhaustState = buildSecondaryState(param1, mixSec2, param2!!)
-                    Processes.energyRecovery(s1, exhaustState, param3 ?: 0.70, param4 ?: 0.60)
+                    Processes.energyRecovery(s1, exhaustState, param3 ?: 0.70, param4 ?: 0.60, us)
                 }
             }
         }.onSuccess { result ->
@@ -235,37 +236,38 @@ class MainViewModel : ViewModel() {
             _ahuError.value = "Set an initial state before adding steps."
             return
         }
+        val us = AppSettings.unitSystem.value
         runCatching {
             when (processType) {
                 ProcessType.SENSIBLE_HEATING ->
-                    Processes.sensibleHeating(currentIn, param1)
+                    Processes.sensibleHeating(currentIn, param1, unitSystem = us)
                 ProcessType.SENSIBLE_COOLING ->
-                    Processes.sensibleCooling(currentIn, param1)
+                    Processes.sensibleCooling(currentIn, param1, unitSystem = us)
                 ProcessType.HUMIDIFICATION ->
-                    if (useW) Processes.humidification(currentIn, w2 = param1)
-                    else      Processes.humidification(currentIn, rh2Pct = param1)
+                    if (useW) Processes.humidification(currentIn, w2 = param1, unitSystem = us)
+                    else      Processes.humidification(currentIn, rh2Pct = param1, unitSystem = us)
                 ProcessType.DEHUMIDIFICATION ->
-                    if (useW) Processes.dehumidification(currentIn, w2 = param1)
-                    else      Processes.dehumidification(currentIn, rh2Pct = param1)
+                    if (useW) Processes.dehumidification(currentIn, w2 = param1, unitSystem = us)
+                    else      Processes.dehumidification(currentIn, rh2Pct = param1, unitSystem = us)
                 ProcessType.COOLING_DEHUMIDIFICATION ->
-                    if (useW) Processes.coolingDehumidification(currentIn, param1, w2 = param2)
-                    else      Processes.coolingDehumidification(currentIn, param1, rh2Pct = param2)
+                    if (useW) Processes.coolingDehumidification(currentIn, param1, w2 = param2, unitSystem = us)
+                    else      Processes.coolingDehumidification(currentIn, param1, rh2Pct = param2, unitSystem = us)
                 ProcessType.HEATING_HUMIDIFICATION ->
-                    if (useW) Processes.heatingHumidification(currentIn, param1, w2 = param2)
-                    else      Processes.heatingHumidification(currentIn, param1, rh2Pct = param2)
+                    if (useW) Processes.heatingHumidification(currentIn, param1, w2 = param2, unitSystem = us)
+                    else      Processes.heatingHumidification(currentIn, param1, rh2Pct = param2, unitSystem = us)
                 ProcessType.EVAPORATIVE_COOLING ->
-                    Processes.evaporativeCooling(currentIn, param1)
+                    Processes.evaporativeCooling(currentIn, param1, us)
                 ProcessType.ADIABATIC_MIXING -> {
                     val s2 = buildSecondaryState(mixDbt2, mixSec2, mixSec2Val)
-                    Processes.adiabaticMixing(currentIn, s2, mixM1, mixM2)
+                    Processes.adiabaticMixing(currentIn, s2, mixM1, mixM2, us)
                 }
                 ProcessType.FAN_HEAT_RISE ->
-                    Processes.fanHeatRise(currentIn, param1, param2 ?: 70.0, param3)
+                    Processes.fanHeatRise(currentIn, param1, param2 ?: 70.0, param3, us)
                 ProcessType.COOLING_COIL ->
-                    Processes.coolingCoil(currentIn, param1, param2 ?: 0.10, param3)
+                    Processes.coolingCoil(currentIn, param1, param2 ?: 0.10, param3, us)
                 ProcessType.ENERGY_RECOVERY -> {
                     val exhaustState = buildSecondaryState(mixDbt2, mixSec2, mixSec2Val)
-                    Processes.energyRecovery(currentIn, exhaustState, param1, param2 ?: 0.60)
+                    Processes.energyRecovery(currentIn, exhaustState, param1, param2 ?: 0.60, us)
                 }
             }
         }.onSuccess { result ->
