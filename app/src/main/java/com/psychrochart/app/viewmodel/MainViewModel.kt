@@ -167,6 +167,11 @@ class MainViewModel : ViewModel() {
         _plottedStates.value = current.takeLast(16)
     }
 
+    fun removeLastPlottedState() {
+        if (_plottedStates.value.isNotEmpty())
+            _plottedStates.value = _plottedStates.value.dropLast(1)
+    }
+
     fun clearPlottedStates() {
         _plottedStates.value = emptyList()
         labelCounter = 1

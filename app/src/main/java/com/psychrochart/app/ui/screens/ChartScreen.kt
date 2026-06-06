@@ -21,7 +21,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.SaveAlt
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -73,6 +76,7 @@ fun ChartScreen(vm: MainViewModel) {
     val chartLayers    by vm.chartLayers.collectAsState()
     val selectedIdx    by vm.selectedPointIdx.collectAsState()
     val unitSystem     by AppSettings.unitSystem.collectAsState()
+    val darkChart      by AppSettings.darkChart.collectAsState()
 
     var scale  by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
@@ -239,11 +243,13 @@ fun ChartScreen(vm: MainViewModel) {
                 fun toY(w: Double) =
                     (TOP_PAD + plotH - ((w - W_MIN) / (W_MAX - W_MIN)) * plotH).toFloat()
 
-                // ── Text styles ────────────────────────────────────────────────
-                val axisLbl    = TextStyle(fontSize = 9.sp,  color = Color(0xFF455A64))
-                val axisTitle  = TextStyle(fontSize = 10.sp, color = Color(0xFF1A252F),
+                // ── Text styles (dark-chart aware) ────────────────────────────
+                val axisClr    = if (darkChart) Color(0xFFB0BEC5) else Color(0xFF455A64)
+                val axisTitleC = if (darkChart) Color(0xFFECEFF1) else Color(0xFF1A252F)
+                val axisLbl    = TextStyle(fontSize = 9.sp,  color = axisClr)
+                val axisTitle  = TextStyle(fontSize = 10.sp, color = axisTitleC,
                                            fontWeight = FontWeight.SemiBold)
-                val tickClr    = Color(0xFF546E7A)
+                val tickClr    = if (darkChart) Color(0xFF78909C) else Color(0xFF546E7A)
                 val rhLbl      = TextStyle(fontSize = 8.sp,  color = ChartRH,
                                            fontWeight = FontWeight.SemiBold)
                 val wbtLbl     = TextStyle(fontSize = 7.sp,  color = ChartWBT,
@@ -251,11 +257,16 @@ fun ChartScreen(vm: MainViewModel) {
                 val hLbl       = TextStyle(fontSize = 7.sp,  color = ChartEnthalpy,
                                            fontWeight = FontWeight.SemiBold)
                 val vLbl       = TextStyle(fontSize = 7.sp,  color = ChartSpecVol)
-                val rightAxis  = TextStyle(fontSize = 8.sp,  color = Color(0xFF546E7A))
+                val rightAxis  = TextStyle(fontSize = 8.sp,  color = axisClr)
 
                 // ── Plot background ────────────────────────────────────────────
                 drawRect(
-                    Color(0xFFF5F9FF),
+                    if (darkChart) Color(0xFF0D1B2A) else Color(0xFFF5F9FF),
+                    topLeft = Offset(0f, 0f),
+                    size = Size(cw, ch),
+                )
+                drawRect(
+                    if (darkChart) Color(0xFF1A2744) else Color(0xFFF5F9FF),
                     topLeft = Offset(LEFT_PAD, TOP_PAD),
                     size = Size(plotW, plotH),
                 )
@@ -615,12 +626,29 @@ fun ChartScreen(vm: MainViewModel) {
                     Icon(Icons.Default.SaveAlt, "Save chart as image",
                         tint = MaterialTheme.colorScheme.onSecondaryContainer)
                 }
+                SmallFloatingActionButton(
+                    onClick = { AppSettings.setDarkChart(!darkChart) },
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                ) {
+                    Icon(
+                        if (darkChart) Icons.Default.LightMode else Icons.Default.DarkMode,
+                        "Toggle dark chart",
+                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                    )
+                }
                 if (plottedStates.isNotEmpty()) {
+                    SmallFloatingActionButton(
+                        onClick = { vm.removeLastPlottedState() },
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ) {
+                        Icon(Icons.Default.Undo, "Undo last point",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     SmallFloatingActionButton(
                         onClick = { vm.clearPlottedStates() },
                         containerColor = MaterialTheme.colorScheme.errorContainer,
                     ) {
-                        Icon(Icons.Default.DeleteSweep, "Clear points",
+                        Icon(Icons.Default.DeleteSweep, "Clear all points",
                             tint = MaterialTheme.colorScheme.onErrorContainer)
                     }
                 }

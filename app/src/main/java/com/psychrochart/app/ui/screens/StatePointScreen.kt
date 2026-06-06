@@ -1,5 +1,6 @@
 package com.psychrochart.app.ui.screens
 
+import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -8,11 +9,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.LocationCity
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -37,6 +41,11 @@ fun StatePointScreen(vm: MainViewModel) {
     var citySearch        by remember { mutableStateOf("") }
     // 0 = Summer, 1 = Monsoon/DP, 2 = Winter
     var citySeasonMode by remember { mutableIntStateOf(0) }
+    val context = LocalContext.current
+    val prefs   = remember { context.getSharedPreferences("city_favourites", Context.MODE_PRIVATE) }
+    var favourites by remember {
+        mutableStateOf(prefs.getStringSet("fav", emptySet())?.toSet() ?: emptySet())
+    }
 
     // Re-init DBT default when unit system changes
     LaunchedEffect(unitSystem) {
@@ -180,11 +189,13 @@ fun StatePointScreen(vm: MainViewModel) {
 
     // ── City Picker Dialog ─────────────────────────────────────────────────────
     if (showCityPicker) {
-        val filtered = ashraeCities.filter { city ->
-            citySearch.isBlank() ||
-            city.name.contains(citySearch, ignoreCase = true) ||
-            city.country.contains(citySearch, ignoreCase = true)
-        }
+        val filtered = ashraeCities
+            .filter { city ->
+                citySearch.isBlank() ||
+                city.name.contains(citySearch, ignoreCase = true) ||
+                city.country.contains(citySearch, ignoreCase = true)
+            }
+            .sortedWith(compareByDescending { favourites.contains(it.name) })
         AlertDialog(
             onDismissRequest = { showCityPicker = false },
             title = { Text("ASHRAE Outdoor Design Conditions") },
@@ -246,8 +257,27 @@ fun StatePointScreen(vm: MainViewModel) {
                             val monDP  = uc.displayTemp(city.dehumidDpt, unitSystem)
                             val monDBT = uc.displayTemp(city.dehumidDbt, unitSystem)
                             val tU = uc.tempUnit(unitSystem)
+                            val isFav = favourites.contains(city.name)
                             ListItem(
                                 headlineContent = { Text(city.name, fontWeight = FontWeight.Medium) },
+                                trailingContent = {
+                                    IconButton(
+                                        onClick = {
+                                            val updated = if (isFav) favourites - city.name
+                                                          else       favourites + city.name
+                                            favourites = updated
+                                            prefs.edit().putStringSet("fav", updated).apply()
+                                        },
+                                        modifier = Modifier.size(32.dp),
+                                    ) {
+                                        Icon(
+                                            if (isFav) Icons.Filled.Star else Icons.Outlined.StarOutline,
+                                            contentDescription = "Favourite",
+                                            tint = if (isFav) Color(0xFFFFC107) else Color(0xFFB0BEC5),
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                },
                                 supportingContent = {
                                     Text(
                                         when (citySeasonMode) {

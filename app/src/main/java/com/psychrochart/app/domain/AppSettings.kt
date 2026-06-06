@@ -15,6 +15,10 @@ object AppSettings {
 
     fun setUnitSystem(us: UnitSystem) { _unitSystem.value = us }
 
+    private val _darkChart = MutableStateFlow(false)
+    val darkChart: StateFlow<Boolean> = _darkChart
+    fun setDarkChart(v: Boolean) { _darkChart.value = v }
+
     fun setAltitude(m: Double) {
         val clamped = m.coerceIn(0.0, 8849.0)
         _altitudeM.value = clamped
