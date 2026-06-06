@@ -69,6 +69,7 @@ private const val BOTTOM_PAD =  70f
 fun ChartScreen(vm: MainViewModel) {
     val plottedStates by vm.plottedStates.collectAsState()
     val processResult  by vm.processResult.collectAsState()
+    val ahuChain       by vm.ahuChain.collectAsState()
     val chartLayers    by vm.chartLayers.collectAsState()
     val selectedIdx    by vm.selectedPointIdx.collectAsState()
     val unitSystem     by AppSettings.unitSystem.collectAsState()
@@ -391,6 +392,20 @@ fun ChartScreen(vm: MainViewModel) {
                                 topLeft = Offset(lx - pm.size.width / 2f, procLabelCy - pm.size.height / 2f),
                                 style = procStyle,
                             )
+                        }
+                    }
+                    // AHU chain arrows — one segment per step, colour-coded by process type
+                    ahuChain.forEach { step ->
+                        val x1 = toX(step.stateIn.dbt)
+                        val y1 = toY(step.stateIn.w.coerceIn(W_MIN, W_MAX))
+                        val x2 = toX(step.stateOut.dbt)
+                        val y2 = toY(step.stateOut.w.coerceIn(W_MIN, W_MAX))
+                        if (step.processType == ProcessType.HEATING_HUMIDIFICATION) {
+                            drawArrowSegment(x2 - x1, 0f, x1, y1, x2, y1, Color(0xFFE53935))
+                            drawArrowSegment(0f, y2 - y1, x2, y1, x2, y2, Color(0xFF1E88E5))
+                        } else {
+                            drawArrowSegment(x2 - x1, y2 - y1, x1, y1, x2, y2,
+                                processArrowColor(step.processType))
                         }
                     }
                 }
