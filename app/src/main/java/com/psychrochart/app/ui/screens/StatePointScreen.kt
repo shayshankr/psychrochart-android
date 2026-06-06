@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -32,8 +33,9 @@ fun StatePointScreen(vm: MainViewModel) {
     var selected   by remember { mutableStateOf(SecondaryInput.RH) }
     var expanded   by remember { mutableStateOf(false) }
     var pointLabel by remember { mutableStateOf("") }
-    var showCityPicker by remember { mutableStateOf(false) }
-    var citySearch     by remember { mutableStateOf("") }
+    var showCityPicker    by remember { mutableStateOf(false) }
+    var citySearch        by remember { mutableStateOf("") }
+    var citySeasonSummer  by remember { mutableStateOf(true) }
 
     // Re-init DBT default when unit system changes
     LaunchedEffect(unitSystem) {
@@ -194,11 +196,36 @@ fun StatePointScreen(vm: MainViewModel) {
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Text("Summer 1% cooling / Winter 99.6% heating (${uc.tempUnit(unitSystem)})",
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = citySeasonSummer,
+                            onClick  = { citySeasonSummer = true },
+                            label    = { Text("Summer") },
+                            colors   = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFFE53935).copy(alpha = 0.15f),
+                                selectedLabelColor     = Color(0xFFE53935),
+                            ),
+                        )
+                        FilterChip(
+                            selected = !citySeasonSummer,
+                            onClick  = { citySeasonSummer = false },
+                            label    = { Text("Winter") },
+                            colors   = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFF1E88E5).copy(alpha = 0.15f),
+                                selectedLabelColor     = Color(0xFF1E88E5),
+                            ),
+                        )
+                    }
+                    Text(
+                        if (citySeasonSummer)
+                            "1% cooling — fills DBT + coincident WBT (${uc.tempUnit(unitSystem)})"
+                        else
+                            "99.6% heating — fills DBT (${uc.tempUnit(unitSystem)}) + RH 80%",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Column(
-                        modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
+                        modifier = Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         filtered.forEach { city ->
@@ -216,10 +243,15 @@ fun StatePointScreen(vm: MainViewModel) {
                                     )
                                 },
                                 modifier = Modifier.clickable {
-                                    // Fill summer design conditions
-                                    dbtText  = uc.defaultTemp(city.summerDbt, unitSystem)
-                                    secValue = uc.defaultTemp(city.summerWbt, unitSystem)
-                                    selected = SecondaryInput.WBT
+                                    if (citySeasonSummer) {
+                                        dbtText  = uc.defaultTemp(city.summerDbt, unitSystem)
+                                        secValue = uc.defaultTemp(city.summerWbt, unitSystem)
+                                        selected = SecondaryInput.WBT
+                                    } else {
+                                        dbtText  = uc.defaultTemp(city.winterDbt, unitSystem)
+                                        secValue = "80"
+                                        selected = SecondaryInput.RH
+                                    }
                                     AppSettings.setAltitude(city.altitudeM)
                                     showCityPicker = false
                                 },
