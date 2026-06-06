@@ -163,7 +163,7 @@ class MainViewModel : ViewModel() {
         val current = _plottedStates.value.toMutableList()
         current.removeAll { it.label == lbl }
         current.add(PlottedState(state, lbl))
-        _plottedStates.value = current.takeLast(8)
+        _plottedStates.value = current.takeLast(16)
     }
 
     fun clearPlottedStates() {
