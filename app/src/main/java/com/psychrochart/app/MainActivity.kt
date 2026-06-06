@@ -458,18 +458,30 @@ private fun SettingsSheetContent() {
 
         // ── Unit system ────────────────────────────────────────────────────────
         Text("Unit System", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             UnitSystem.entries.forEach { us ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.selectable(
-                        selected = unitSystem == us,
-                        onClick  = { AppSettings.setUnitSystem(us) },
-                    )
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = unitSystem == us,
+                            onClick  = { AppSettings.setUnitSystem(us) },
+                        ),
                 ) {
                     RadioButton(selected = unitSystem == us, onClick = { AppSettings.setUnitSystem(us) })
-                    Text(if (us == UnitSystem.SI) "SI (°C, kJ/kg, kg/kg)" else "IP (°F, BTU/lb, gr/lb)")
+                    Column {
+                        Text(
+                            if (us == UnitSystem.SI) "SI — Metric" else "IP — Imperial",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            if (us == UnitSystem.SI) "°C · kJ/kg · kg/kg" else "°F · BTU/lb · gr/lb",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
