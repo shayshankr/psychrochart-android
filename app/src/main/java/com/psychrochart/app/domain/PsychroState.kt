@@ -23,6 +23,9 @@ enum class ProcessType(val label: String) {
     HEATING_HUMIDIFICATION("Heating & Humidification"),
     EVAPORATIVE_COOLING("Evaporative Cooling"),
     ADIABATIC_MIXING("Adiabatic Mixing"),
+    FAN_HEAT_RISE("Fan Heat Rise"),
+    ENERGY_RECOVERY("Energy Recovery (ERV)"),
+    COOLING_COIL("Cooling Coil (ADP/BF)"),
 }
 
 data class ProcessResult(

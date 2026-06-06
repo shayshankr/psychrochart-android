@@ -11,8 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.psychrochart.app.domain.ProcessType
-import com.psychrochart.app.domain.SecondaryInput
+import com.psychrochart.app.domain.*
 import com.psychrochart.app.ui.components.MetricsCard
 import com.psychrochart.app.ui.components.StateResultCard
 import com.psychrochart.app.viewmodel.MainViewModel
@@ -22,24 +21,30 @@ import com.psychrochart.app.viewmodel.MainViewModel
 fun ProcessScreen(vm: MainViewModel) {
     val processResult by vm.processResult.collectAsState()
     val processError  by vm.processError.collectAsState()
+    val unitSystem    by AppSettings.unitSystem.collectAsState()
+    val uc = UnitConverter
 
     // Initial state inputs
-    var dbt1  by remember { mutableStateOf("30") }
-    var sec1  by remember { mutableStateOf("50") }
+    var dbt1   by remember { mutableStateOf(uc.defaultTemp(30.0, unitSystem)) }
+    var sec1   by remember { mutableStateOf("50") }
     var secIn1 by remember { mutableStateOf(SecondaryInput.RH) }
     var dropIn1 by remember { mutableStateOf(false) }
 
     // Process type
     var processType by remember { mutableStateOf(ProcessType.SENSIBLE_COOLING) }
-    var dropType   by remember { mutableStateOf(false) }
+    var dropType    by remember { mutableStateOf(false) }
 
-    // Process parameter inputs
-    var param1 by remember { mutableStateOf("20") }
-    var param2 by remember { mutableStateOf("40") }
-    var param3 by remember { mutableStateOf("1.0") }
-    var param4 by remember { mutableStateOf("1.0") }
-    var useW   by remember { mutableStateOf(false) }
+    // Process parameters
+    var param1    by remember { mutableStateOf("20") }
+    var param2    by remember { mutableStateOf("40") }
+    var param3    by remember { mutableStateOf("1.0") }
+    var param4    by remember { mutableStateOf("1.0") }
+    var useW      by remember { mutableStateOf(false) }
     var secIn2Mix by remember { mutableStateOf(SecondaryInput.W) }
+
+    LaunchedEffect(unitSystem) {
+        dbt1 = uc.defaultTemp(30.0, unitSystem)
+    }
 
     Column(
         modifier = Modifier
@@ -56,7 +61,7 @@ fun ProcessScreen(vm: MainViewModel) {
         OutlinedTextField(
             value = dbt1,
             onValueChange = { dbt1 = it },
-            label = { Text("DBT (°C)") },
+            label = { Text("DBT (${uc.tempUnit(unitSystem)})") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
@@ -84,7 +89,7 @@ fun ProcessScreen(vm: MainViewModel) {
         OutlinedTextField(
             value = sec1,
             onValueChange = { sec1 = it },
-            label = { Text("${secInputLabel(secIn1)} (${secInputUnit(secIn1)})") },
+            label = { Text("${secInputLabel(secIn1)} (${secondaryUnit(secIn1, unitSystem)})") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
@@ -112,23 +117,41 @@ fun ProcessScreen(vm: MainViewModel) {
             }
         }
 
-        // ── Process parameters (dynamic) ──────────────────────────────────────
+        // ── Process parameters ─────────────────────────────────────────────────
         SectionLabel("Process Parameters")
-        ProcessParams(processType, param1, { param1 = it }, param2, { param2 = it },
-            param3, { param3 = it }, useW, { useW = it },
-            param4, { param4 = it }, secIn2Mix, { secIn2Mix = it })
+        ProcessParams(
+            type = processType,
+            unitSystem = unitSystem,
+            p1 = param1, onP1 = { param1 = it },
+            p2 = param2, onP2 = { param2 = it },
+            p3 = param3, onP3 = { param3 = it },
+            useW = useW, onUseW = { useW = it },
+            p4 = param4, onP4 = { param4 = it },
+            secIn2 = secIn2Mix, onSecIn2 = { secIn2Mix = it },
+        )
 
         // ── Run button ─────────────────────────────────────────────────────────
         Button(
             onClick = {
-                val dbt  = dbt1.toDoubleOrNull() ?: return@Button
-                val sec  = sec1.toDoubleOrNull()  ?: return@Button
-                val p1   = param1.toDoubleOrNull() ?: return@Button
-                val p2   = param2.toDoubleOrNull()
-                val p3   = param3.toDoubleOrNull()
-                val p4   = param4.toDoubleOrNull()
-                val s1 = buildState(vm, dbt, secIn1, sec) ?: return@Button
-                vm.runProcess(processType, s1, p1, p2, p3, useW, p4, secIn2Mix)
+                val dbtRaw = dbt1.toDoubleOrNull()   ?: return@Button
+                val secRaw = sec1.toDoubleOrNull()   ?: return@Button
+                val dbtSi  = uc.inputTemp(dbtRaw, unitSystem)
+                val secSi  = convertSecondaryToSi(secIn1, secRaw, unitSystem)
+
+                vm.calculateState(dbtSi, secIn1, secSi)
+                val s1 = vm.stateResult.value ?: return@Button
+
+                val p1d = param1.toDoubleOrNull() ?: return@Button
+                val p2d = param2.toDoubleOrNull()
+                val p3d = param3.toDoubleOrNull()
+                val p4d = param4.toDoubleOrNull()
+
+                // Convert params from user units to SI for temperature-based params
+                val p1si = convertProcessParam(processType, 1, p1d, unitSystem, secIn2Mix, useW)
+                val p2si = p2d?.let { convertProcessParam(processType, 2, it, unitSystem, secIn2Mix, useW) }
+                val p3si = p3d?.let { convertProcessParam(processType, 3, it, unitSystem, secIn2Mix, useW) }
+
+                vm.runProcess(processType, s1, p1si, p2si, p3si, useW, p4d, secIn2Mix)
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -139,7 +162,8 @@ fun ProcessScreen(vm: MainViewModel) {
 
         processError?.let {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-                Text(it, modifier = Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onErrorContainer)
+                Text(it, modifier = Modifier.padding(12.dp),
+                    color = MaterialTheme.colorScheme.onErrorContainer)
             }
         }
 
@@ -162,6 +186,7 @@ private fun SectionLabel(text: String) {
 @Composable
 private fun ProcessParams(
     type: ProcessType,
+    unitSystem: UnitSystem,
     p1: String, onP1: (String) -> Unit,
     p2: String, onP2: (String) -> Unit,
     p3: String, onP3: (String) -> Unit,
@@ -169,35 +194,40 @@ private fun ProcessParams(
     p4: String = "1.0", onP4: (String) -> Unit = {},
     secIn2: SecondaryInput = SecondaryInput.W, onSecIn2: (SecondaryInput) -> Unit = {},
 ) {
+    val uc = UnitConverter
+    val tU = uc.tempUnit(unitSystem)
+    val fU = uc.flowUnit(unitSystem)
+    val pU = uc.pressureUnit(unitSystem)
+
     when (type) {
         ProcessType.SENSIBLE_HEATING, ProcessType.SENSIBLE_COOLING -> {
-            NumberField("Final DBT (°C)", p1, onP1)
-            NumberField("Total air quantity (kg/s)", p2, onP2)
+            NumberField("Final DBT ($tU)", p1, onP1)
+            NumberField("Total air quantity ($fU)", p2, onP2)
         }
         ProcessType.EVAPORATIVE_COOLING -> {
-            NumberField("Final DBT (°C)", p1, onP1)
+            NumberField("Final DBT ($tU)", p1, onP1)
         }
         ProcessType.HUMIDIFICATION, ProcessType.DEHUMIDIFICATION -> {
-            WOrRhToggle(useW, onUseW)
-            if (useW) NumberField("Final W (kg/kg)", p1, onP1)
+            WOrRhToggle(useW, onUseW, unitSystem)
+            if (useW) NumberField("Final W (${uc.wUnit(unitSystem)})", p1, onP1)
             else      NumberField("Final RH (%)", p1, onP1)
         }
         ProcessType.COOLING_DEHUMIDIFICATION -> {
-            NumberField("Final DBT (°C)", p1, onP1)
-            WOrRhToggle(useW, onUseW)
-            if (useW) NumberField("Final W (kg/kg)", p2, onP2)
+            NumberField("Final DBT ($tU)", p1, onP1)
+            WOrRhToggle(useW, onUseW, unitSystem)
+            if (useW) NumberField("Final W (${uc.wUnit(unitSystem)})", p2, onP2)
             else      NumberField("Final RH (%)", p2, onP2)
-            NumberField("Total air quantity (kg/s)", p3, onP3)
+            NumberField("Total air quantity ($fU)", p3, onP3)
         }
         ProcessType.HEATING_HUMIDIFICATION -> {
-            NumberField("Final DBT (°C)", p1, onP1)
-            WOrRhToggle(useW, onUseW)
-            if (useW) NumberField("Final W (kg/kg)", p2, onP2)
+            NumberField("Final DBT ($tU)", p1, onP1)
+            WOrRhToggle(useW, onUseW, unitSystem)
+            if (useW) NumberField("Final W (${uc.wUnit(unitSystem)})", p2, onP2)
             else      NumberField("Final RH (%)", p2, onP2)
         }
         ProcessType.ADIABATIC_MIXING -> {
             var dropIn2 by remember { mutableStateOf(false) }
-            NumberField("State 2 — DBT (°C)", p1, onP1)
+            NumberField("State 2 — DBT ($tU)", p1, onP1)
             ExposedDropdownMenuBox(expanded = dropIn2, onExpandedChange = { dropIn2 = it }) {
                 OutlinedTextField(
                     value = secInputLabel(secIn2),
@@ -208,26 +238,66 @@ private fun ProcessParams(
                     modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
                 )
                 ExposedDropdownMenu(expanded = dropIn2, onDismissRequest = { dropIn2 = false }) {
-                    listOf(SecondaryInput.WBT, SecondaryInput.DPT, SecondaryInput.W, SecondaryInput.H).forEach { opt ->
+                    listOf(SecondaryInput.WBT, SecondaryInput.DPT, SecondaryInput.W, SecondaryInput.H)
+                        .forEach { opt ->
+                            DropdownMenuItem(
+                                text = { Text(secInputLabel(opt)) },
+                                onClick = { onSecIn2(opt); dropIn2 = false },
+                            )
+                        }
+                }
+            }
+            NumberField("State 2 — ${secInputLabel(secIn2)} (${secondaryUnit(secIn2, unitSystem)})", p2, onP2)
+            NumberField("Mass flow m₁ ($fU)", p3, onP3)
+            NumberField("Mass flow m₂ ($fU)", p4, onP4)
+        }
+        ProcessType.FAN_HEAT_RISE -> {
+            NumberField("Fan Total Pressure ($pU)", p1, onP1)
+            NumberField("Fan Efficiency (%)", p2, onP2)
+            NumberField("Mass flow ($fU, optional)", p3, onP3)
+        }
+        ProcessType.COOLING_COIL -> {
+            NumberField("ADP Temperature ($tU)", p1, onP1)
+            NumberField("Bypass Factor (0.0 – 1.0)", p2, onP2)
+            NumberField("Mass flow ($fU, optional)", p3, onP3)
+        }
+        ProcessType.ENERGY_RECOVERY -> {
+            var dropExh by remember { mutableStateOf(false) }
+            Text("Exhaust / Return Air State",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.secondary)
+            NumberField("Exhaust DBT ($tU)", p1, onP1)
+            ExposedDropdownMenuBox(expanded = dropExh, onExpandedChange = { dropExh = it }) {
+                OutlinedTextField(
+                    value = secInputLabel(secIn2),
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Exhaust — second input") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(dropExh) },
+                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                )
+                ExposedDropdownMenu(expanded = dropExh, onDismissRequest = { dropExh = false }) {
+                    SecondaryInput.entries.forEach { opt ->
                         DropdownMenuItem(
                             text = { Text(secInputLabel(opt)) },
-                            onClick = { onSecIn2(opt); dropIn2 = false }
+                            onClick = { onSecIn2(opt); dropExh = false },
                         )
                     }
                 }
             }
-            NumberField("State 2 — ${secInputLabel(secIn2)} (${secInputUnit(secIn2)})", p2, onP2)
-            NumberField("Mass flow m₁ (kg/s)", p3, onP3)
-            NumberField("Mass flow m₂ (kg/s)", p4, onP4)
+            NumberField("Exhaust ${secInputLabel(secIn2)} (${secondaryUnit(secIn2, unitSystem)})", p2, onP2)
+            NumberField("Sensible Effectiveness (0.0 – 1.0)", p3, onP3)
+            NumberField("Latent Effectiveness (0.0 – 1.0)", p4, onP4)
         }
     }
 }
 
 @Composable
-private fun WOrRhToggle(useW: Boolean, onToggle: (Boolean) -> Unit) {
+private fun WOrRhToggle(useW: Boolean, onToggle: (Boolean) -> Unit, us: UnitSystem) {
+    val wLabel = if (us == UnitSystem.IP) "By W gr/lb" else "By W kg/kg"
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterChip(selected = !useW, onClick = { onToggle(false) }, label = { Text("By RH %") })
-        FilterChip(selected = useW,  onClick = { onToggle(true) },  label = { Text("By W kg/kg") })
+        FilterChip(selected = useW,  onClick = { onToggle(true) },  label = { Text(wLabel) })
     }
 }
 
@@ -252,14 +322,58 @@ private fun secInputLabel(s: SecondaryInput) = when (s) {
     SecondaryInput.H   -> "Specific Enthalpy"
 }
 
-private fun secInputUnit(s: SecondaryInput) = when (s) {
-    SecondaryInput.RH  -> "%"
-    SecondaryInput.WBT, SecondaryInput.DPT -> "°C"
-    SecondaryInput.W   -> "kg/kg"
-    SecondaryInput.V   -> "m³/kg"
-    SecondaryInput.H   -> "kJ/kg"
+/** Convert a process parameter from display unit to SI where needed. */
+private fun convertProcessParam(
+    type: ProcessType,
+    paramIndex: Int,
+    value: Double,
+    us: UnitSystem,
+    secIn2: SecondaryInput,
+    useW: Boolean,
+): Double {
+    val uc = UnitConverter
+    return when (type) {
+        ProcessType.SENSIBLE_HEATING, ProcessType.SENSIBLE_COOLING -> when (paramIndex) {
+            1 -> uc.inputTemp(value, us)          // target DBT
+            2 -> uc.inputFlow(value, us)           // mass flow
+            else -> value
+        }
+        ProcessType.EVAPORATIVE_COOLING -> if (paramIndex == 1) uc.inputTemp(value, us) else value
+        ProcessType.HUMIDIFICATION, ProcessType.DEHUMIDIFICATION -> when {
+            paramIndex == 1 && useW -> uc.inputW(value, us)   // final W
+            else -> value                                       // RH unchanged
+        }
+        ProcessType.COOLING_DEHUMIDIFICATION -> when (paramIndex) {
+            1 -> uc.inputTemp(value, us)
+            2 -> if (useW) uc.inputW(value, us) else value
+            3 -> uc.inputFlow(value, us)
+            else -> value
+        }
+        ProcessType.HEATING_HUMIDIFICATION -> when (paramIndex) {
+            1 -> uc.inputTemp(value, us)
+            2 -> if (useW) uc.inputW(value, us) else value
+            else -> value
+        }
+        ProcessType.ADIABATIC_MIXING -> when (paramIndex) {
+            1 -> uc.inputTemp(value, us)           // DBT of stream 2
+            2 -> convertSecondaryToSi(secIn2, value, us)
+            3, 4 -> uc.inputFlow(value, us)
+            else -> value
+        }
+        ProcessType.FAN_HEAT_RISE -> when (paramIndex) {
+            1 -> uc.inputPressure(value, us)       // Pa or inH2O
+            3 -> uc.inputFlow(value, us)
+            else -> value                           // efficiency %: unchanged
+        }
+        ProcessType.COOLING_COIL -> when (paramIndex) {
+            1 -> uc.inputTemp(value, us)            // ADP temperature
+            3 -> uc.inputFlow(value, us)
+            else -> value                            // bypass factor: unchanged
+        }
+        ProcessType.ENERGY_RECOVERY -> when (paramIndex) {
+            1 -> uc.inputTemp(value, us)            // exhaust DBT
+            2 -> convertSecondaryToSi(secIn2, value, us)
+            else -> value                            // effectiveness: unchanged
+        }
+    }
 }
-
-private fun buildState(vm: MainViewModel, dbt: Double, sec: SecondaryInput, value: Double) =
-    runCatching { vm.calculateState(dbt, sec, value) }.getOrNull()
-        .let { vm.stateResult.value }

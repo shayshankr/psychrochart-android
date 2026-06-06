@@ -6,12 +6,17 @@ import kotlin.math.abs
 
 /**
  * Pure-Kotlin implementation of ASHRAE psychrometric formulas (SI units).
- * Mirrors the logic of psychrolib used in the original Python app.
+ * Pressure is configurable via [updatePressure] / [AppSettings.setAltitude].
  */
 object PsychroCalc {
 
-    const val PRESSURE = 101325.0   // Pa, standard sea-level
+    /** Atmospheric pressure in Pa; updated when altitude changes. */
+    var pressure: Double = 101325.0
+        private set
+
     private const val W_EPSILON = 1e-7
+
+    fun updatePressure(pa: Double) { pressure = pa }
 
     // ── Saturation pressure (ASHRAE 2009 fundamentals, eq 5 & 6) ─────────────
 
@@ -40,12 +45,12 @@ object PsychroCalc {
 
     // ── Humidity ratio helpers ─────────────────────────────────────────────────
 
-    /** Saturation humidity ratio at [dbt] °C (equivalent to RH = 100 %). */
+    /** Saturation humidity ratio at [dbt] °C (RH = 100 %). */
     fun wSat(dbt: Double) = humRatioFromRelHum(dbt, 1.0)
 
     fun humRatioFromRelHum(dbt: Double, rhFrac: Double): Double {
         val pws = saturationPressure(dbt)
-        return maxOf(W_EPSILON, 0.621945 * pws * rhFrac / (PRESSURE - pws * rhFrac))
+        return maxOf(W_EPSILON, 0.621945 * pws * rhFrac / (pressure - pws * rhFrac))
     }
 
     fun humRatioFromWetBulb(dbt: Double, wbt: Double): Double {
@@ -60,14 +65,13 @@ object PsychroCalc {
 
     fun humRatioFromSpecVol(dbt: Double, v: Double): Double {
         val T = dbt + 273.15
-        val w = (v * PRESSURE / (287.042 * T) - 1.0) / 1.6078
+        val w = (v * pressure / (287.042 * T) - 1.0) / 1.6078
         return maxOf(W_EPSILON, w)
     }
 
     // ── Derived properties from (DBT, W) ──────────────────────────────────────
 
     fun wetBulbFromHumRatio(dbt: Double, w: Double): Double {
-        // Bisection: find WBT in [−50, DBT] where humRatioFromWetBulb(dbt, WBT) == w
         var lo = maxOf(-50.0, dbt - 60.0)
         var hi = dbt
         repeat(60) {
@@ -78,7 +82,6 @@ object PsychroCalc {
     }
 
     fun dewPointFromHumRatio(w: Double): Double {
-        // Bisection: find T where humRatioFromRelHum(T, 1.0) == w
         var lo = -60.0
         var hi = 90.0
         repeat(60) {
@@ -97,10 +100,10 @@ object PsychroCalc {
         1.006 * dbt + w * (2501.0 + 1.86 * dbt)   // kJ/kg dry air
 
     fun specVolFromHumRatio(dbt: Double, w: Double): Double =
-        287.042 * (dbt + 273.15) * (1.0 + 1.6078 * w) / PRESSURE
+        287.042 * (dbt + 273.15) * (1.0 + 1.6078 * w) / pressure
 
     fun vaporPressureFromHumRatio(w: Double): Double =
-        w * PRESSURE / (0.621945 + w) / 1000.0     // kPa
+        w * pressure / (0.621945 + w) / 1000.0     // kPa
 
     fun degreeOfSaturation(dbt: Double, w: Double): Double {
         val ws = humRatioFromRelHum(dbt, 1.0)

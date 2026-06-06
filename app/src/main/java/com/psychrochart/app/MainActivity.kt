@@ -17,7 +17,11 @@ import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.DeviceHub
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NewReleases
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Thermostat
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,10 +37,14 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.psychrochart.app.domain.AppSettings
+import com.psychrochart.app.domain.UnitConverter
+import com.psychrochart.app.domain.UnitSystem
 import com.psychrochart.app.ui.navigation.Screen
 import com.psychrochart.app.ui.navigation.bottomNavScreens
 import com.psychrochart.app.ui.screens.AhuChainScreen
 import com.psychrochart.app.ui.screens.ChartScreen
+import com.psychrochart.app.ui.screens.HvacToolsScreen
 import com.psychrochart.app.ui.screens.ProcessScreen
 import com.psychrochart.app.ui.screens.StatePointScreen
 import com.psychrochart.app.ui.theme.PsychroChartTheme
@@ -51,6 +59,36 @@ private const val KEY_LAST_VERSION = "last_version_code"
 private data class VersionEntry(val version: String, val changes: List<String>)
 
 private val changelog = listOf(
+    VersionEntry("15.0.0", listOf(
+        "SI / IP unit toggle — switch between °C/kJ/kg and °F/BTU/lb/gr/lb app-wide",
+        "Altitude / elevation input with ICAO pressure formula (affects all calculations)",
+        "Quick altitude presets: Sea Level, Denver, Calgary, Mexico City, Bogotá",
+        "ASHRAE city picker — fill outdoor design DBT/WBT from 40+ cities in one tap",
+        "Named state points — label any plotted point (OA, RA, SA, Room…)",
+        "ASHRAE 55 comfort zone overlay on psychrometric chart (toggleable green polygon)",
+        "New process: Fan Heat Rise — calculates temperature rise from fan total pressure & efficiency",
+        "New process: Energy Recovery (ERV) — sensible & latent effectiveness model",
+        "New process: Cooling Coil (ADP/BF) — apparatus dew-point and bypass factor",
+        "HVAC Tools tab: SHR line & supply air state from room sensible/latent loads",
+        "HVAC Tools tab: ASHRAE 62.1 ventilation calculator (12 zone categories)",
+        "HVAC Tools tab: Psychrometric property table (DBT × RH grid, scrollable)",
+        "HVAC Tools tab: Cooling tower performance (approach, range, effectiveness)",
+        "Copy to clipboard button on all result cards",
+        "Settings gear icon in toolbar for quick unit & altitude access",
+    )),
+    VersionEntry("14.0.0", listOf(
+        "Air quantity (kg/s) field on sensible heating, cooling, and cooling & dehumidification processes",
+        "Total load displayed in kW and TR in process results",
+        "Adiabatic mixing: State 2 now accepts WBT, DPT, W, or h as second input",
+        "Both mass flows (m1 and m2) are now user-specified in adiabatic mixing",
+        "Chart state-point and process arrow labels rotated vertically to prevent overlap",
+        "Y-axis humidity ratio label corrected to upward orientation",
+    )),
+    VersionEntry("13.0.0", listOf(
+        "What's New changelog screen added (this screen!)",
+        "Auto-shows after each app update with version-by-version bullet points",
+        "Accessible manually via the info icon → What's New",
+    )),
     VersionEntry("12.0.0", listOf(
         "In-app onboarding guide shown on first launch",
         "Help sheet accessible anytime via the info icon in the toolbar",
@@ -65,6 +103,19 @@ private val changelog = listOf(
         "Curves clipped cleanly to plot area with edge labels",
         "Tap any point on the chart to inspect all psychrometric properties",
         "Pinch-to-zoom and pan gesture support",
+    )),
+    VersionEntry("9.0.0", listOf(
+        "Synced chart improvements from web app",
+        "Save chart as image feature added",
+    )),
+    VersionEntry("8.0.0", listOf(
+        "Overhauled chart axes with proper tick labels, titles, and minor grid lines",
+        "Right Y-axis added for improved readability",
+    )),
+    VersionEntry("7.0.0", listOf(
+        "Specific enthalpy (h) added as a secondary input option for state point calculation",
+        "AHU Chain tab introduced for multi-step air handling unit simulation",
+        "Synced latest features from companion web app",
     )),
 )
 
@@ -85,6 +136,7 @@ class MainActivity : ComponentActivity() {
                 var showHelp       by remember { mutableStateOf(false) }
                 var showOnboarding by remember { mutableStateOf(false) }
                 var showWhatsNew   by remember { mutableStateOf(false) }
+                var showSettings   by remember { mutableStateOf(false) }
 
                 LaunchedEffect(Unit) {
                     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -115,6 +167,9 @@ class MainActivity : ComponentActivity() {
                         TopAppBar(
                             title = { Text("PsychroChart", fontWeight = FontWeight.Bold) },
                             actions = {
+                                IconButton(onClick = { showSettings = true }) {
+                                    Icon(Icons.Default.Settings, contentDescription = "Settings")
+                                }
                                 IconButton(onClick = { showHelp = true }) {
                                     Icon(Icons.Default.Info, contentDescription = "How to use")
                                 }
@@ -154,6 +209,7 @@ class MainActivity : ComponentActivity() {
                         composable(Screen.Processes.route)  { ProcessScreen(vm) }
                         composable(Screen.Chart.route)      { ChartScreen(vm) }
                         composable(Screen.AhuChain.route)   { AhuChainScreen(vm) }
+                        composable(Screen.HvacTools.route)  { HvacToolsScreen(vm) }
                     }
                 }
 
@@ -193,6 +249,13 @@ class MainActivity : ComponentActivity() {
                 if (showHelp) {
                     ModalBottomSheet(onDismissRequest = { showHelp = false }) {
                         HelpSheetContent(onShowWhatsNew = { showHelp = false; showWhatsNew = true })
+                    }
+                }
+
+                // ── Settings bottom sheet ──────────────────────────────────────
+                if (showSettings) {
+                    ModalBottomSheet(onDismissRequest = { showSettings = false }) {
+                        SettingsSheetContent()
                     }
                 }
             }
@@ -367,6 +430,101 @@ private fun HelpSheetContent(onShowWhatsNew: () -> Unit) {
                 "Tap Reset Chain to start over",
             )
         )
+    }
+}
+
+// ── Settings sheet ────────────────────────────────────────────────────────────
+
+@Composable
+private fun SettingsSheetContent() {
+    val unitSystem by AppSettings.unitSystem.collectAsState()
+    val altitudeM  by AppSettings.altitudeM.collectAsState()
+    val uc = UnitConverter
+
+    var altText by remember(unitSystem) {
+        mutableStateOf("%.0f".format(uc.displayAlt(altitudeM, unitSystem)))
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 36.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        Text("Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        HorizontalDivider()
+
+        // ── Unit system ────────────────────────────────────────────────────────
+        Text("Unit System", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            UnitSystem.entries.forEach { us ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.selectable(
+                        selected = unitSystem == us,
+                        onClick  = { AppSettings.setUnitSystem(us) },
+                    )
+                ) {
+                    RadioButton(selected = unitSystem == us, onClick = { AppSettings.setUnitSystem(us) })
+                    Text(if (us == UnitSystem.SI) "SI (°C, kJ/kg, kg/kg)" else "IP (°F, BTU/lb, gr/lb)")
+                }
+            }
+        }
+
+        // ── Altitude ───────────────────────────────────────────────────────────
+        Text("Altitude / Elevation", style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold)
+        Text(
+            "Changes atmospheric pressure used in all psychrometric calculations.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = altText,
+                onValueChange = { altText = it },
+                label = { Text("Altitude (${uc.altUnit(unitSystem)})") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Button(onClick = {
+                val raw = altText.toDoubleOrNull() ?: return@Button
+                val m   = uc.inputAlt(raw, unitSystem)
+                AppSettings.setAltitude(m)
+            }) { Text("Apply") }
+        }
+
+        val currentPressure = AppSettings.pressureAtAltitude(altitudeM)
+        Text(
+            "Current pressure: %.1f Pa  (%.4f atm)  —  Alt: %.0f %s".format(
+                currentPressure, currentPressure / 101325.0,
+                uc.displayAlt(altitudeM, unitSystem), uc.altUnit(unitSystem)),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        // ── Preset altitudes ───────────────────────────────────────────────────
+        Text("Quick Presets", style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary)
+        val presets = listOf("Sea Level" to 0.0, "Denver, CO" to 1611.0,
+            "Calgary" to 1099.0, "Mexico City" to 2240.0, "Bogotá" to 2625.0)
+        presets.chunked(3).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { (label, m) ->
+                    OutlinedButton(
+                        onClick = {
+                            AppSettings.setAltitude(m)
+                            altText = "%.0f".format(uc.displayAlt(m, unitSystem))
+                        },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    ) { Text(label, style = MaterialTheme.typography.labelSmall) }
+                }
+            }
+        }
     }
 }
 

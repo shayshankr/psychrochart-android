@@ -5,6 +5,7 @@ import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.DeviceHub
 import androidx.compose.material.icons.filled.Thermostat
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.ui.graphics.vector.ImageVector
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
@@ -12,6 +13,13 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     data object Processes  : Screen("processes",   "Processes",  Icons.AutoMirrored.Filled.CompareArrows)
     data object Chart      : Screen("chart",       "Chart",      Icons.Default.Analytics)
     data object AhuChain   : Screen("ahu_chain",   "AHU Chain",  Icons.Default.DeviceHub)
+    data object HvacTools  : Screen("hvac_tools",  "HVAC Tools", Icons.Default.Tune)
 }
 
-val bottomNavScreens = listOf(Screen.StatePoint, Screen.Processes, Screen.Chart, Screen.AhuChain)
+val bottomNavScreens = listOf(
+    Screen.StatePoint,
+    Screen.Processes,
+    Screen.Chart,
+    Screen.AhuChain,
+    Screen.HvacTools,
+)

@@ -38,8 +38,11 @@ import androidx.compose.ui.text.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.unit.dp
+import com.psychrochart.app.domain.AppSettings
 import com.psychrochart.app.domain.ProcessType
 import com.psychrochart.app.domain.PsychroCalc
+import com.psychrochart.app.domain.UnitConverter
+import com.psychrochart.app.domain.UnitSystem
 import com.psychrochart.app.ui.theme.*
 import com.psychrochart.app.viewmodel.MainViewModel
 import kotlinx.coroutines.Dispatchers
@@ -66,6 +69,7 @@ fun ChartScreen(vm: MainViewModel) {
     val processResult  by vm.processResult.collectAsState()
     val chartLayers    by vm.chartLayers.collectAsState()
     val selectedIdx    by vm.selectedPointIdx.collectAsState()
+    val unitSystem     by AppSettings.unitSystem.collectAsState()
 
     var scale  by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
@@ -162,6 +166,17 @@ fun ChartScreen(vm: MainViewModel) {
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = ChartSpecVol.copy(alpha = 0.18f),
                             selectedLabelColor = ChartSpecVol,
+                        ),
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = chartLayers.comfortZone,
+                        onClick = { vm.toggleChartLayer("comfortZone") },
+                        label = { Text("ASHRAE 55") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFF4CAF50).copy(alpha = 0.18f),
+                            selectedLabelColor = Color(0xFF2E7D32),
                         ),
                     )
                 }
@@ -321,6 +336,31 @@ fun ChartScreen(vm: MainViewModel) {
                             )
                         }
                     }
+                    // ASHRAE 55 comfort zone (summer, ~0.5 clo, 1.0 met, approximate)
+                    if (chartLayers.comfortZone) {
+                        val comfortPts = listOf(
+                            Pair(20.0, PsychroCalc.humRatioFromRelHum(20.0, 0.10)),
+                            Pair(26.7, PsychroCalc.humRatioFromRelHum(26.7, 0.10)),
+                            Pair(26.7, 0.012),
+                            Pair(22.5, 0.012),
+                            Pair(20.0, PsychroCalc.humRatioFromRelHum(20.0, 0.65)),
+                        )
+                        val comfortPath = Path().apply {
+                            comfortPts.forEachIndexed { i, (dbt, w) ->
+                                val x = toX(dbt); val y = toY(w.coerceIn(W_MIN, W_MAX))
+                                if (i == 0) moveTo(x, y) else lineTo(x, y)
+                            }
+                            close()
+                        }
+                        drawPath(comfortPath, Color(0xFF4CAF50).copy(alpha = 0.12f))
+                        drawPath(comfortPath, Color(0xFF4CAF50).copy(alpha = 0.55f),
+                            style = Stroke(2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 4f))))
+                        val clx = toX(23.0); val cly = toY(0.006f.toDouble())
+                        drawText(textMeasurer, "ASHRAE 55",
+                            topLeft = Offset(clx - 22f, cly),
+                            style = TextStyle(fontSize = 7.sp, color = Color(0xFF2E7D32),
+                                fontWeight = FontWeight.Bold, background = Color.White.copy(alpha = 0.6f)))
+                    }
                     // Process arrow
                     processResult?.let { result ->
                         val x1 = toX(result.state1.dbt)
@@ -355,12 +395,14 @@ fun ChartScreen(vm: MainViewModel) {
                 }
 
                 // ── X-axis ticks + labels ──────────────────────────────────────
+                val isIp = unitSystem == UnitSystem.IP
                 for (t in -10..50 step 5) {
                     val x = toX(t.toDouble())
                     drawLine(tickClr, Offset(x, TOP_PAD + plotH),
                         Offset(x, TOP_PAD + plotH + 7f), 1.5f)
-                    val m = textMeasurer.measure("$t", axisLbl)
-                    drawText(textMeasurer, "$t",
+                    val lbl = if (isIp) "${UnitConverter.cToF(t.toDouble()).toInt()}" else "$t"
+                    val m = textMeasurer.measure(lbl, axisLbl)
+                    drawText(textMeasurer, lbl,
                         topLeft = Offset(x - m.size.width / 2f, TOP_PAD + plotH + 10f),
                         style = axisLbl)
                 }
@@ -370,19 +412,21 @@ fun ChartScreen(vm: MainViewModel) {
                     drawLine(tickClr.copy(alpha = 0.35f),
                         Offset(x, TOP_PAD + plotH), Offset(x, TOP_PAD + plotH + 4f), 0.8f)
                 }
-                val xTitleM = textMeasurer.measure("Dry-Bulb Temperature  (°C)", axisTitle)
-                drawText(textMeasurer, "Dry-Bulb Temperature  (°C)",
+                val xAxisTitle = if (isIp) "Dry-Bulb Temperature  (°F)" else "Dry-Bulb Temperature  (°C)"
+                val xTitleM = textMeasurer.measure(xAxisTitle, axisTitle)
+                drawText(textMeasurer, xAxisTitle,
                     topLeft = Offset(
                         LEFT_PAD + plotW / 2f - xTitleM.size.width / 2f,
                         TOP_PAD + plotH + 36f),
                     style = axisTitle)
 
-                // ── Y-axis (kg/kg) ─────────────────────────────────────────────
+                // ── Y-axis (kg/kg or gr/lb) ────────────────────────────────────
                 for (i in 0..7) {
                     val wVal = i * 0.005
                     val y = toY(wVal)
                     drawLine(tickClr, Offset(LEFT_PAD - 7f, y), Offset(LEFT_PAD, y), 1.5f)
-                    val lbl = "%.3f".format(wVal)
+                    val lbl = if (isIp) "%.0f".format(UnitConverter.kgkgToGrLb(wVal))
+                              else "%.3f".format(wVal)
                     val m = textMeasurer.measure(lbl, axisLbl)
                     drawText(textMeasurer, lbl,
                         topLeft = Offset(LEFT_PAD - 10f - m.size.width, y - m.size.height / 2f),
@@ -398,8 +442,10 @@ fun ChartScreen(vm: MainViewModel) {
                     wvt += 0.001
                 }
                 withTransform({ rotate(90f, pivot = Offset(14f, TOP_PAD + plotH / 2f)) }) {
-                    val m = textMeasurer.measure("Humidity Ratio  W  (kg/kg dry air)", axisTitle)
-                    drawText(textMeasurer, "Humidity Ratio  W  (kg/kg dry air)",
+                    val yAxisTitle = if (isIp) "Humidity Ratio  W  (gr/lb dry air)"
+                                    else "Humidity Ratio  W  (kg/kg dry air)"
+                    val m = textMeasurer.measure(yAxisTitle, axisTitle)
+                    drawText(textMeasurer, yAxisTitle,
                         topLeft = Offset(14f - m.size.width / 2f,
                             TOP_PAD + plotH / 2f - m.size.height / 2f),
                         style = axisTitle)
@@ -600,7 +646,10 @@ fun ChartScreen(vm: MainViewModel) {
                                     )
                                     Text(ps.label, fontWeight = FontWeight.SemiBold)
                                     Text(
-                                        "%.1f°C  %.0f%%RH".format(ps.state.dbt, ps.state.rh),
+                                        "%.1f%s  %.0f%%".format(
+                                            UnitConverter.displayTemp(ps.state.dbt, unitSystem),
+                                            UnitConverter.tempUnit(unitSystem),
+                                            ps.state.rh),
                                         style  = MaterialTheme.typography.labelSmall,
                                         color  = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -707,7 +756,10 @@ private fun processArrowColor(type: ProcessType) = when (type) {
     ProcessType.COOLING_DEHUMIDIFICATION -> Color(0xFF039BE5)
     ProcessType.EVAPORATIVE_COOLING      -> Color(0xFF00ACC1)
     ProcessType.ADIABATIC_MIXING         -> Color(0xFF8E24AA)
-    else                                 -> Color(0xFF37474F)
+    ProcessType.FAN_HEAT_RISE            -> Color(0xFFFF6F00)
+    ProcessType.ENERGY_RECOVERY          -> Color(0xFF00695C)
+    ProcessType.COOLING_COIL             -> Color(0xFF0277BD)
+    ProcessType.HEATING_HUMIDIFICATION   -> Color(0xFFE53935)
 }
 
 private fun DrawScope.drawArrowSegment(

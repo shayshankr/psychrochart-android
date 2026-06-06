@@ -2,12 +2,20 @@ package com.psychrochart.app.ui.components
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.psychrochart.app.domain.AppSettings
 import com.psychrochart.app.domain.PsychroState
+import com.psychrochart.app.domain.UnitConverter
+import com.psychrochart.app.domain.UnitSystem
 
 @Composable
 fun StateResultCard(
@@ -15,33 +23,65 @@ fun StateResultCard(
     title: String = "Psychrometric State",
     modifier: Modifier = Modifier,
 ) {
+    val unitSystem by AppSettings.unitSystem.collectAsState()
+    val uc = UnitConverter
+    val clipboard = LocalClipboardManager.current
+
+    val tUnit = uc.tempUnit(unitSystem)
+    val wUnit = uc.wUnit(unitSystem)
+    val hUnit = uc.hUnit(unitSystem)
+    val vUnit = uc.vUnit(unitSystem)
+
+    val props = remember(state, unitSystem) {
+        listOf(
+            "DBT" to "%.1f $tUnit".format(uc.displayTemp(state.dbt, unitSystem)),
+            "WBT" to "%.1f $tUnit".format(uc.displayTemp(state.wbt, unitSystem)),
+            "DPT" to "%.1f $tUnit".format(uc.displayTemp(state.dpt, unitSystem)),
+            "RH"  to "%.1f %%".format(state.rh),
+            "W"   to if (unitSystem == UnitSystem.IP) "%.1f $wUnit".format(uc.kgkgToGrLb(state.w))
+                     else "%.5f $wUnit".format(state.w),
+            "h"   to "%.2f $hUnit".format(uc.displayH(state.h, unitSystem)),
+            "v"   to "%.4f $vUnit".format(uc.displayV(state.v, unitSystem)),
+            "Pv"  to if (unitSystem == UnitSystem.IP) "%.4f psi".format(uc.kPaToPsi(state.pv))
+                     else "%.3f kPa".format(state.pv),
+            "μ"   to "%.4f".format(state.mu),
+        )
+    }
+
+    val clipboardText = remember(state, unitSystem) {
+        props.joinToString("\n") { (k, v) -> "$k: $v" }
+    }
+
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                IconButton(
+                    onClick = { clipboard.setText(AnnotatedString(clipboardText)) },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = "Copy to clipboard",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             HorizontalDivider()
 
             // 3-column property grid
-            val props = listOf(
-                "DBT" to "%.1f °C".format(state.dbt),
-                "WBT" to "%.1f °C".format(state.wbt),
-                "DPT" to "%.1f °C".format(state.dpt),
-                "RH"  to "%.1f %%".format(state.rh),
-                "W"   to "%.5f kg/kg".format(state.w),
-                "h"   to "%.2f kJ/kg".format(state.h),
-                "v"   to "%.4f m³/kg".format(state.v),
-                "Pv"  to "%.3f kPa".format(state.pv),
-                "μ"   to "%.4f".format(state.mu),
-            )
             props.chunked(3).forEach { row ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -63,20 +103,41 @@ fun MetricsCard(
     title: String,
     modifier: Modifier = Modifier,
 ) {
+    val clipboard = LocalClipboardManager.current
+    val clipboardText = remember(metrics) {
+        metrics.entries.joinToString("\n") { (k, v) -> "$k: $v" }
+    }
+
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer)
+                IconButton(
+                    onClick = { clipboard.setText(AnnotatedString(clipboardText)) },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = "Copy to clipboard",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                    )
+                }
+            }
             HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
             metrics.forEach { (key, value) ->
                 Row(
