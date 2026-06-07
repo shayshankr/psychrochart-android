@@ -13,7 +13,7 @@ android {
         applicationId = "com.psychrochart.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 23
+        versionCode = 24
         versionName = "16.4.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -61,7 +61,7 @@ android {
 
 play {
     serviceAccountCredentials.set(rootProject.file("play-service-account.json"))
-    track.set("internal")
+    track.set("alpha")
     defaultToAppBundles.set(true)
     artifactDir.set(layout.buildDirectory.dir("outputs/bundle/release"))
 }
