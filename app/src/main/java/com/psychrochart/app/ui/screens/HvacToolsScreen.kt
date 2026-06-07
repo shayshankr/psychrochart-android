@@ -2,8 +2,10 @@
 
 package com.psychrochart.app.ui.screens
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import kotlin.math.ceil
 import kotlin.math.pow
 import kotlin.math.sqrt
@@ -388,47 +390,61 @@ private fun PropertyTableTab() {
             modifier = Modifier.padding(horizontal = 8.dp),
         )
 
+        var showInfo by remember { mutableStateOf(false) }
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
         ) {
-            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text("About this table",
-                    style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary)
-                Text("W (kg/kg or gr/lb): humidity ratio — mass of water vapour per kg of dry air. " +
-                    "Directly proportional to latent heat load. W × 2501 kJ/kg ≈ latent heat per kg.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("h (kJ/kg or BTU/lb): total enthalpy = sensible + latent. " +
-                    "Formula: h = 1.006·T + W·(2501 + 1.86·T). Used to size cooling coils and AHUs.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Computed using ASHRAE 2017 psychrometric equations at current site pressure. " +
-                    "Change altitude in Settings to recalculate for elevated sites.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("What do these values mean?",
+                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary)
+                    TextButton(onClick = { showInfo = !showInfo }) {
+                        Text(if (showInfo) "Hide" else "Show", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                if (showInfo) {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("W (kg/kg or gr/lb): humidity ratio — mass of water vapour per kg of dry air. " +
+                            "Multiply by 2501 kJ/kg to get approximate latent heat per kg.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("h (kJ/kg or BTU/lb): total enthalpy = sensible + latent. " +
+                            "Formula: h = 1.006·T + W·(2501 + 1.86·T). Used for coil and AHU sizing.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Values use ASHRAE 2017 equations at current site pressure (Settings → Altitude).",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
         }
 
+        // Table: weight(1f) fills remaining height; horizontalScroll on Box, verticalScroll on Column
         Box(
-            Modifier
-                .fillMaxSize()
-                .horizontalScroll(rememberScrollState())
-                .verticalScroll(rememberScrollState())
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 // Header row
                 Row {
-                    TableCell("DBT\n(${uc.tempUnit(unitSystem)})", isHeader = true, width = 64)
-                    rhValues.forEach { rh -> TableCell("$rh%", isHeader = true, width = 72) }
+                    PropCell("DBT\n(${uc.tempUnit(unitSystem)})", isHeader = true, width = 56)
+                    rhValues.forEach { rh -> PropCell("$rh%", isHeader = true, width = 68) }
                 }
                 HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline)
 
                 dbtValues.forEach { dbtSi ->
                     val dbtDisplay = uc.displayTemp(dbtSi.toDouble(), unitSystem)
                     Row {
-                        TableCell("%.0f".format(dbtDisplay), isHeader = true, width = 64)
+                        PropCell("%.0f".format(dbtDisplay), isHeader = true, width = 56)
                         rhValues.forEach { rh ->
                             val state = PsychroCalc.fromDbtRh(dbtSi.toDouble(), rh.toDouble())
                             val value = if (showEnthalpy)
@@ -436,7 +452,7 @@ private fun PropertyTableTab() {
                             else
                                 if (unitSystem == UnitSystem.IP) "%.1f".format(uc.kgkgToGrLb(state.w))
                                 else "%.4f".format(state.w)
-                            TableCell(value, width = 72)
+                            PropCell(value, isHeader = false, width = 68)
                         }
                     }
                 }
@@ -461,6 +477,36 @@ private fun TableCell(text: String, isHeader: Boolean = false, width: Int) {
                     fontSize = 10.sp,
                 ),
                 maxLines = 2,
+            )
+        }
+    }
+}
+
+// Dedicated cell for the psychrometric property table — no wrapping, clear borders
+@Composable
+private fun PropCell(text: String, isHeader: Boolean, width: Int) {
+    val bgColor = if (isHeader) MaterialTheme.colorScheme.secondaryContainer
+                  else          MaterialTheme.colorScheme.surface
+    val borderColor = MaterialTheme.colorScheme.outlineVariant
+    Surface(
+        color = bgColor,
+        modifier = Modifier
+            .width(width.dp)
+            .border(0.5.dp, borderColor),
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = if (isHeader) FontWeight.Bold else FontWeight.Normal,
+                    fontSize = 11.sp,
+                ),
+                maxLines = if (isHeader) 2 else 1,
+                softWrap = isHeader,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }

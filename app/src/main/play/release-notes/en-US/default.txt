@@ -1,7 +1,6 @@
-HVAC Suite v16.4.0
+HVAC Suite v16.4.1
 
-- SHR calculator: specify supply delta-T, mass flow auto-calculated
-- Duct sizing: round-to-rectangular conversion tool (ASHRAE De formula)
-- Ventilation: ASHRAE 62.1 Table 6-1 reference for 17 space types
-- Property table: W and h values explained with formulas
-- Room load: ADP recommendation from ESHF + room conditions
+- Property table: fixed table not visible on small screens
+- Fixed word-wrap inside table cells (values now single-line, no clipping)
+- Table explanation card is now collapsible to maximise table area
+- Scroll fixed: horizontal and vertical scroll now work independently
