@@ -859,13 +859,13 @@ private fun DrawScope.drawChartPath(
 }
 
 private fun saveChartToGallery(context: android.content.Context, bitmap: android.graphics.Bitmap) {
-    val filename = "PsychroChart_${System.currentTimeMillis()}.png"
+    val filename = "HVACSuite_${System.currentTimeMillis()}.png"
     val values = ContentValues().apply {
         put(MediaStore.Images.Media.DISPLAY_NAME, filename)
         put(MediaStore.Images.Media.MIME_TYPE, "image/png")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             put(MediaStore.Images.Media.RELATIVE_PATH,
-                Environment.DIRECTORY_PICTURES + "/PsychroChart")
+                Environment.DIRECTORY_PICTURES + "/HVAC Suite")
             put(MediaStore.Images.Media.IS_PENDING, 1)
         }
     }

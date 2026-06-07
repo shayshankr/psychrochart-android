@@ -59,6 +59,27 @@ private const val KEY_LAST_VERSION = "last_version_code"
 private data class VersionEntry(val version: String, val changes: List<String>)
 
 private val changelog = listOf(
+    VersionEntry("16.2.0", listOf(
+        "App fully rebranded as HVAC Suite — name updated throughout the interface",
+        "New app icon: teal background with airflow waves and thermometer",
+        "Saved chart images now stored in the HVAC Suite folder in your gallery",
+    )),
+    VersionEntry("16.1.0", listOf(
+        "App renamed from Psychro Chart to HVAC Suite on Play Store",
+    )),
+    VersionEntry("16.0.0", listOf(
+        "Pipe Sizing Calculator — CHW, HHW, condenser water; equal-friction or velocity method",
+        "Fan Laws Calculator — affinity laws Q∝N, ΔP∝N², P∝N³; VFD frequency and power saving %",
+        "Economizer Analyser — enthalpy & dry-bulb free cooling check; mixed-air table at 0–100% OA",
+        "Room Load Estimator — occupants, lighting, equipment, solar gain, conduction, infiltration",
+        "VRF Capacity Correction — temperature, piping length, height correction factors",
+        "Refrigerant Quick Reference — saturation pressure tables for R-410A, R-32, R-22, R-134a, R-600a, R-290",
+        "Duct Sizing Calculator — round & rectangular; equal friction or velocity; NC noise level estimate",
+        "Monsoon / dehumidification design condition in city picker (ASHRAE 1% dew-point + coincident DBT)",
+        "Favourite cities — star toggle persists between sessions; favourites sorted to top",
+        "Dark mode chart — teal FAB toggles chart canvas between light and dark",
+        "Process undo — FAB on chart screen removes the last plotted state point",
+    )),
     VersionEntry("15.0.0", listOf(
         "SI / IP unit toggle — switch between °C/kJ/kg and °F/BTU/lb/gr/lb app-wide",
         "Altitude / elevation input with ICAO pressure formula (affects all calculations)",
@@ -165,7 +186,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     topBar = {
                         TopAppBar(
-                            title = { Text("PsychroChart", fontWeight = FontWeight.Bold) },
+                            title = { Text("HVAC Suite", fontWeight = FontWeight.Bold) },
                             actions = {
                                 IconButton(onClick = { showSettings = true }) {
                                     Icon(Icons.Default.Settings, contentDescription = "Settings")
@@ -217,7 +238,7 @@ class MainActivity : ComponentActivity() {
                 if (showOnboarding) {
                     AlertDialog(
                         onDismissRequest = {},
-                        title = { Text("Welcome to PsychroChart", fontWeight = FontWeight.Bold) },
+                        title = { Text("Welcome to HVAC Suite", fontWeight = FontWeight.Bold) },
                         text = {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 OnboardingStep("1", "Calculator",
@@ -378,7 +399,7 @@ private fun HelpSheetContent(onShowWhatsNew: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("How to use PsychroChart",
+            Text("How to use HVAC Suite",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold)
             TextButton(onClick = onShowWhatsNew) {

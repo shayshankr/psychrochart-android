@@ -1,0 +1,12 @@
+HVAC Suite v16.3.0
+
+- New teal icon, HVAC Suite branding throughout
+- Pipe Sizing (CHW/HHW/condenser water)
+- Fan Laws (VFD speed, power saving %)
+- Economizer analyser (free cooling, mixed-air table)
+- Room Load estimator (solar, conduction, infiltration)
+- VRF Capacity Correction (temp, piping, height)
+- Refrigerant Reference (R-410A/32/22/134a/600a/290)
+- Duct Sizing with NC noise level
+- Monsoon design condition in city picker
+- Favourite cities, dark chart, process undo
