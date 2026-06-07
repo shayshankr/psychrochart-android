@@ -13,8 +13,8 @@ android {
         applicationId = "com.psychrochart.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 18
-        versionName = "16.1.0"
+        versionCode = 19
+        versionName = "16.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

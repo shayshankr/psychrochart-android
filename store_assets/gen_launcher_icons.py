@@ -1,15 +1,12 @@
 """
-Generate PNG launcher icons at every required Android density
-and place them directly into the mipmap-* resource folders.
-Also writes updated adaptive icon XMLs.
+HVAC Suite launcher icons — Option 1: Airflow + Thermometer (teal)
+Generates PNG icons at every Android density + updates adaptive-icon XMLs.
 """
-from PIL import Image, ImageDraw, ImageFont
-import math, os, shutil
+from PIL import Image, ImageDraw
+import math, os
 
 RES_DIR = r"C:\Users\shays\Desktop\interview\psychrochart-android\app\src\main\res"
 
-# Adaptive icon foreground is drawn on a 108dp canvas; the safe zone is 66dp centre.
-# For PNGs we just need: mdpi=48, hdpi=72, xhdpi=96, xxhdpi=144, xxxhdpi=192
 DENSITIES = {
     "mipmap-mdpi":    48,
     "mipmap-hdpi":    72,
@@ -18,160 +15,83 @@ DENSITIES = {
     "mipmap-xxxhdpi": 192,
 }
 
-# Palette
-BG_DARK  = (44,  62,  80)   # #2C3E50
-TEAL     = (26, 188, 156)   # #1ABC9C
-ORANGE   = (230,126,  34)   # #E67E22
-WHITE    = (255,255,255)
-BLUE     = (16,  85, 168)
-
-def get_font(size, bold=False):
-    candidates = [
-        "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
-        "C:/Windows/Fonts/Arial.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else \
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    ]
-    for p in candidates:
-        if os.path.exists(p):
-            try:
-                return ImageFont.truetype(p, size)
-            except Exception:
-                pass
-    return ImageFont.load_default()
+TEAL_BG = (0,   105,  92)   # #00695C
+WHITE   = (255, 255, 255)
+AMBER   = (255, 179,   0)   # #FFB300
 
 
 def draw_icon(size: int) -> Image.Image:
-    """Draw a square launcher icon of `size` × `size` pixels."""
+    """Draw the HVAC Suite icon at `size` × `size` pixels."""
     img  = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img, "RGBA")
+    s    = size / 108.0   # scale: design is in 108dp units
 
-    # ── Background circle (fills the square) ──────────────────────────────
-    draw.ellipse([0, 0, size - 1, size - 1], fill=BG_DARK)
+    # ── Background (full square; Android clips to shape) ──────────────────
+    draw.rectangle([0, 0, size - 1, size - 1], fill=TEAL_BG)
 
-    # ── Margin for chart area ──────────────────────────────────────────────
-    m   = int(size * 0.14)        # outer margin
-    cw  = size - 2 * m            # chart width
-    ch  = int(cw * 0.75)          # chart height (4:3)
-    cx0 = m
-    cy0 = (size - ch) // 2
+    # ── 3 airflow sine waves ──────────────────────────────────────────────
+    lw   = max(2, round(5.5 * s))
+    x0   = 12 * s
+    x1   = 74 * s
+    ampl = 11 * s
+    for yc_dp in (30.0, 54.0, 78.0):
+        yc  = yc_dp * s
+        pts = [
+            (x0 + t / 80.0 * (x1 - x0),
+             yc - ampl * math.sin(t / 80.0 * 2 * math.pi))
+            for t in range(81)
+        ]
+        draw.line(pts, fill=WHITE, width=lw)
 
-    # Chart background
-    draw.rectangle([cx0, cy0, cx0 + cw, cy0 + ch], fill=(*WHITE, 18))
+    # ── Thermometer ───────────────────────────────────────────────────────
+    cx      = 87 * s          # shaft centre-x
+    sh_hw   = 3  * s          # shaft half-width  (6 dp total)
+    sh_top  = 20 * s          # top of shaft
+    sh_bot  = 75 * s          # bottom of shaft (flush with bulb top)
+    bl_cy   = 83 * s          # bulb centre-y
+    bl_r    = 8  * s          # bulb outer radius
+    mc_top  = 47 * s          # mercury top inside shaft
+    mc_hw   = 1.6 * s         # mercury half-width in shaft
+    mc_r    = 5.5 * s         # mercury radius in bulb
 
-    # ── Simplified saturation curve ────────────────────────────────────────
-    DBT_MIN, DBT_MAX = -10, 50
-    W_MIN,   W_MAX   =   0, 0.030
+    # Shaft body (white rectangle + rounded top cap)
+    draw.rectangle([cx - sh_hw, sh_top, cx + sh_hw, sh_bot], fill=WHITE)
+    draw.ellipse([cx - sh_hw, sh_top - sh_hw,
+                  cx + sh_hw, sh_top + sh_hw], fill=WHITE)
 
-    def tx(dbt):
-        return cx0 + (dbt - DBT_MIN) / (DBT_MAX - DBT_MIN) * cw
+    # Bulb (white circle)
+    draw.ellipse([cx - bl_r, bl_cy - bl_r,
+                  cx + bl_r, bl_cy + bl_r], fill=WHITE)
 
-    def ty(ww):
-        return cy0 + ch - (ww - W_MIN) / (W_MAX - W_MIN) * ch
+    # Mercury column in shaft (amber)
+    draw.rectangle([cx - mc_hw, mc_top, cx + mc_hw, sh_bot], fill=AMBER)
 
-    # Saturation curve points
-    sat_pts = []
-    for t in range(-10, 51, 3):
-        pws = 610.78 * math.exp(17.27 * t / (t + 237.3))
-        ws  = min(0.622 * pws / (101325 - pws), W_MAX)
-        sat_pts.append((tx(t), ty(ws)))
-
-    lw = max(1, size // 48)
-    if len(sat_pts) > 1:
-        draw.line(sat_pts, fill=(*WHITE,), width=lw + 1)
-
-    # Two RH curves (40 %, 70 %)
-    for rh in [0.40, 0.70]:
-        pts = []
-        for t in range(-10, 51, 3):
-            pws = 610.78 * math.exp(17.27 * t / (t + 237.3))
-            ws  = min(0.622 * rh * pws / (101325 - rh * pws), W_MAX)
-            if ws < 0:
-                continue
-            pts.append((tx(t), ty(ws)))
-        if len(pts) > 1:
-            draw.line(pts, fill=(*TEAL, 180), width=lw)
-
-    # Chart border
-    draw.rectangle([cx0, cy0, cx0 + cw, cy0 + ch],
-                   outline=(*WHITE, 80), width=lw)
-
-    # ── State-point dot ────────────────────────────────────────────────────
-    dot_dbt, dot_w = 28, 0.012
-    dx = tx(dot_dbt)
-    dy = ty(dot_w)
-    r  = max(3, size // 20)
-    draw.ellipse([dx - r, dy - r, dx + r, dy + r], fill=ORANGE)
-    ri = max(1, r // 2)
-    draw.ellipse([dx - ri, dy - ri, dx + ri, dy + ri], fill=WHITE)
-
-    # ── "P" letter watermark (very faint) ─────────────────────────────────
-    fsize = max(8, int(size * 0.40))
-    font  = get_font(fsize, bold=True)
-    bbox  = draw.textbbox((0, 0), "P", font=font)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text(
-        ((size - tw) // 2 - bbox[0], (size - th) // 2 - bbox[1]),
-        "P", font=font, fill=(*TEAL, 35)
-    )
+    # Mercury in bulb (amber)
+    draw.ellipse([cx - mc_r, bl_cy - mc_r,
+                  cx + mc_r, bl_cy + mc_r], fill=AMBER)
 
     return img
 
 
-def main():
-    for folder, px in DENSITIES.items():
-        mipmap_dir = os.path.join(RES_DIR, folder)
-        os.makedirs(mipmap_dir, exist_ok=True)
+# ── XML templates ──────────────────────────────────────────────────────────────
 
-        # Remove old XML adaptive icon files (they'd conflict with our PNGs)
-        for xml_name in ("ic_launcher.xml", "ic_launcher_round.xml"):
-            xml_path = os.path.join(mipmap_dir, xml_name)
-            if os.path.exists(xml_path):
-                os.remove(xml_path)
-                print(f"  Removed {xml_path}")
-
-        # Write PNG launcher icons
-        icon = draw_icon(px)
-        for png_name in ("ic_launcher.png", "ic_launcher_round.png"):
-            out_path = os.path.join(mipmap_dir, png_name)
-            icon.save(out_path)
-            print(f"  Saved  {out_path}  ({px}×{px})")
-
-    # ── mipmap-anydpi-v26  (adaptive icon for API 26+) ─────────────────────
-    anydpi_dir = os.path.join(RES_DIR, "mipmap-anydpi-v26")
-    os.makedirs(anydpi_dir, exist_ok=True)
-
-    adaptive_xml = """\
+ADAPTIVE_XML = """\
 <?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@drawable/ic_launcher_background"/>
     <foreground android:drawable="@drawable/ic_launcher_foreground"/>
 </adaptive-icon>
 """
-    for xml_name in ("ic_launcher.xml", "ic_launcher_round.xml"):
-        xml_path = os.path.join(anydpi_dir, xml_name)
-        with open(xml_path, "w") as f:
-            f.write(adaptive_xml)
-        print(f"  Wrote  {xml_path}")
 
-    # ── drawable: background = solid dark colour ────────────────────────────
-    drawable_dir = os.path.join(RES_DIR, "drawable")
-    os.makedirs(drawable_dir, exist_ok=True)
-
-    bg_xml = """\
+BACKGROUND_XML = """\
 <?xml version="1.0" encoding="utf-8"?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="#FF2C3E50"/>
+    <solid android:color="#FF00695C"/>
 </shape>
 """
-    bg_path = os.path.join(drawable_dir, "ic_launcher_background.xml")
-    with open(bg_path, "w") as f:
-        f.write(bg_xml)
-    print(f"  Wrote  {bg_path}")
 
-    # ── drawable: foreground = vector chart icon ────────────────────────────
-    fg_xml = """\
+FOREGROUND_XML = """\
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -179,52 +99,95 @@ def main():
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Chart background rect (safe zone 21..87) -->
-    <path
-        android:fillColor="#14FFFFFF"
-        android:pathData="M20,30 L88,30 L88,82 L20,82 Z"/>
-
-    <!-- Saturation curve (approximate arc) -->
+    <!-- Airflow wave 1 (top) -->
     <path
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="3"
+        android:strokeWidth="5.5"
         android:fillColor="#00000000"
-        android:pathData="M20,82 Q40,78 55,60 Q70,42 88,30"/>
+        android:strokeLineCap="round"
+        android:pathData="M 12,30 Q 26,20 43,30 Q 60,40 74,30"/>
 
-    <!-- 70% RH curve -->
+    <!-- Airflow wave 2 (middle) -->
     <path
-        android:strokeColor="#1ABC9C"
-        android:strokeWidth="2"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5.5"
         android:fillColor="#00000000"
-        android:pathData="M20,82 Q42,80 58,68 Q74,56 88,42"/>
+        android:strokeLineCap="round"
+        android:pathData="M 12,54 Q 26,44 43,54 Q 60,64 74,54"/>
 
-    <!-- 40% RH curve -->
+    <!-- Airflow wave 3 (bottom) -->
     <path
-        android:strokeColor="#1ABC9C"
-        android:strokeWidth="2"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5.5"
         android:fillColor="#00000000"
-        android:pathData="M20,82 Q45,81 62,74 Q78,68 88,58"/>
+        android:strokeLineCap="round"
+        android:pathData="M 12,78 Q 26,68 43,78 Q 60,88 74,78"/>
 
-    <!-- Chart border -->
-    <path
-        android:strokeColor="#44FFFFFF"
-        android:strokeWidth="2"
-        android:fillColor="#00000000"
-        android:pathData="M20,30 L88,30 L88,82 L20,82 Z"/>
-
-    <!-- State-point dot (orange) -->
-    <path
-        android:fillColor="#E67E22"
-        android:pathData="M65,52 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0"/>
-    <!-- White centre -->
+    <!-- Thermometer shaft: white rounded-top flat-bottom capsule -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M65,52 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0"/>
+        android:pathData="M 84,23 a3,3,0,0,1,6,0 L 90,75 L 84,75 Z"/>
+
+    <!-- Thermometer bulb: white circle -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 87,83 m-8,0 a8,8,0,1,0,16,0 a8,8,0,1,0,-16,0"/>
+
+    <!-- Mercury in shaft: amber fill -->
+    <path
+        android:fillColor="#FFB300"
+        android:pathData="M 85.5,47 L 88.5,47 L 88.5,75 L 85.5,75 Z"/>
+
+    <!-- Mercury in bulb: amber fill -->
+    <path
+        android:fillColor="#FFB300"
+        android:pathData="M 87,83 m-5.5,0 a5.5,5.5,0,1,0,11,0 a5.5,5.5,0,1,0,-11,0"/>
+
+    <!-- Tick marks on thermometer shaft -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.5"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round"
+        android:pathData="M 91,35 L 95,35 M 91,50 L 95,50 M 91,65 L 95,65"/>
+
 </vector>
 """
+
+
+def main():
+    drawable_dir = os.path.join(RES_DIR, "drawable")
+    anydpi_dir   = os.path.join(RES_DIR, "mipmap-anydpi-v26")
+    os.makedirs(drawable_dir, exist_ok=True)
+    os.makedirs(anydpi_dir,   exist_ok=True)
+
+    # ── PNG icons at every density ─────────────────────────────────────────
+    for folder, px in DENSITIES.items():
+        out_dir = os.path.join(RES_DIR, folder)
+        os.makedirs(out_dir, exist_ok=True)
+        icon = draw_icon(px)
+        for name in ("ic_launcher.png", "ic_launcher_round.png"):
+            path = os.path.join(out_dir, name)
+            icon.save(path)
+            print(f"  Saved  {path}  ({px}x{px})")
+
+    # ── Adaptive icon XML (API 26+) ────────────────────────────────────────
+    for name in ("ic_launcher.xml", "ic_launcher_round.xml"):
+        path = os.path.join(anydpi_dir, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(ADAPTIVE_XML)
+        print(f"  Wrote  {path}")
+
+    # ── Drawable: background colour ────────────────────────────────────────
+    bg_path = os.path.join(drawable_dir, "ic_launcher_background.xml")
+    with open(bg_path, "w", encoding="utf-8") as f:
+        f.write(BACKGROUND_XML)
+    print(f"  Wrote  {bg_path}")
+
+    # ── Drawable: foreground vector ────────────────────────────────────────
     fg_path = os.path.join(drawable_dir, "ic_launcher_foreground.xml")
-    with open(fg_path, "w") as f:
-        f.write(fg_xml)
+    with open(fg_path, "w", encoding="utf-8") as f:
+        f.write(FOREGROUND_XML)
     print(f"  Wrote  {fg_path}")
 
     print("\nAll launcher icon assets written successfully.")
