@@ -24,6 +24,27 @@ import androidx.compose.ui.unit.sp
 import com.psychrochart.app.domain.*
 import com.psychrochart.app.viewmodel.MainViewModel
 
+// ASHRAE 62.1-2022 Table 6-1 reference rates: Triple(name, Rp L/s·person, Ra L/s·m²)
+private val ventRates = listOf(
+    Triple("Office",               5.0,  0.06),
+    Triple("Conference Room",     10.0,  0.06),
+    Triple("Classroom (K-12)",     5.0,  0.06),
+    Triple("University Lecture",   7.5,  0.06),
+    Triple("Restaurant / Dining",  7.5,  0.18),
+    Triple("Retail Store",         3.8,  0.12),
+    Triple("Lobby / Reception",    3.8,  0.06),
+    Triple("Corridor",             0.0,  0.06),
+    Triple("Gymnasium / Fitness", 10.0,  0.06),
+    Triple("Hotel Room",           3.8,  0.06),
+    Triple("Hospital Patient Rm",  5.0,  0.18),
+    Triple("Laboratory",           5.0,  0.30),
+    Triple("Auditorium / Theatre", 7.5,  0.06),
+    Triple("Library / Reading",    5.0,  0.12),
+    Triple("Computer Lab",         5.0,  0.12),
+    Triple("Barber / Beauty",      7.5,  0.18),
+    Triple("Parking Garage",       0.0,  0.75),
+)
+
 @Composable
 fun HvacToolsScreen(vm: MainViewModel) {
     val tabs = listOf(
@@ -74,10 +95,11 @@ private fun ShrTab(vm: MainViewModel) {
     var roomRh    by remember { mutableStateOf("50") }
     var sensible  by remember { mutableStateOf("50.0") }
     var latent    by remember { mutableStateOf("15.0") }
-    var massFlow  by remember { mutableStateOf("5.0") }
+    var deltaT    by remember { mutableStateOf(if (unitSystem == UnitSystem.IP) "14.4" else "8.0") }
 
     LaunchedEffect(unitSystem) {
         roomDbt  = uc.defaultTemp(26.0, unitSystem)
+        deltaT   = if (unitSystem == UnitSystem.IP) "14.4" else "8.0"
     }
 
     Column(
@@ -107,8 +129,13 @@ private fun ShrTab(vm: MainViewModel) {
             HvacField("Latent (kW)", latent, { latent = it }, Modifier.weight(1f))
         }
 
-        HvacSectionLabel("Air Flow")
-        HvacField("Mass Flow (${uc.flowUnit(unitSystem)})", massFlow, { massFlow = it })
+        HvacSectionLabel("Supply Temperature Difference")
+        HvacField("Supply ΔT (Δ${uc.tempUnit(unitSystem)})", deltaT, { deltaT = it })
+        Text(
+            "Room DBT − Supply DBT. Typical: 8–12 °C (14–22 °F) for AHU systems.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
         Button(
             onClick = {
@@ -116,11 +143,14 @@ private fun ShrTab(vm: MainViewModel) {
                 val rh  = roomRh.toDoubleOrNull()  ?: return@Button
                 val qs  = sensible.toDoubleOrNull() ?: return@Button
                 val ql  = latent.toDoubleOrNull()   ?: return@Button
-                val mf  = massFlow.toDoubleOrNull() ?: return@Button
+                val dt  = deltaT.toDoubleOrNull()   ?: return@Button
+                if (dt <= 0) return@Button
+                val dtC = if (unitSystem == UnitSystem.IP) dt * 5.0 / 9.0 else dt
+                val mf  = qs / (1.006 * dtC)
                 vm.calculateShr(
                     uc.inputTemp(dbt, unitSystem),
                     rh, qs, ql,
-                    uc.inputFlow(mf, unitSystem),
+                    mf,
                 )
             },
             modifier = Modifier.fillMaxWidth(),
@@ -157,6 +187,14 @@ private fun ShrTab(vm: MainViewModel) {
                     HvacResultRow("Supply Air h",   "%.2f %s".format(uc.displayH(r.supplyState.h, unitSystem), hUnit))
                     HorizontalDivider()
                     HvacResultRow("Total Load", "%.2f kW  /  %.3f TR".format(r.totalLoadKw, r.totalLoadKw / 3.5169))
+                    HorizontalDivider()
+                    HvacResultRow("Computed Mass Flow",
+                        "%.3f kg/s  (%.2f ${uc.flowUnit(unitSystem)})".format(
+                            r.massFlowKgs, uc.displayFlow(r.massFlowKgs, unitSystem)))
+                    HvacResultRow("Supply Air ΔT",
+                        "%.1f Δ${uc.tempUnit(unitSystem)}".format(
+                            uc.displayTemp(r.roomState.dbt, unitSystem) -
+                            uc.displayTemp(r.supplyState.dbt, unitSystem)))
                 }
             }
         }
@@ -259,6 +297,57 @@ private fun VentilationTab(vm: MainViewModel) {
                 }
             }
         }
+
+        var showRef by remember { mutableStateOf(false) }
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("ASHRAE 62.1-2022 Table 6-1 Reference",
+                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary)
+                    TextButton(onClick = { showRef = !showRef }) {
+                        Text(if (showRef) "Hide" else "Show")
+                    }
+                }
+                if (showRef) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    Box(Modifier.horizontalScroll(rememberScrollState())) {
+                        Column {
+                            Row {
+                                TableCell("Space Type",   true, 130)
+                                TableCell("Rp\nL/s·p",   true,  52)
+                                TableCell("Ra\nL/s·m²",  true,  58)
+                                TableCell("Rp\nCFM/p",   true,  52)
+                                TableCell("Ra\nCFM/ft²", true,  62)
+                            }
+                            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline)
+                            ventRates.forEach { (name, rp, ra) ->
+                                Row {
+                                    TableCell(name,                      false, 130)
+                                    TableCell("%.1f".format(rp),          false,  52)
+                                    TableCell("%.2f".format(ra),          false,  58)
+                                    TableCell("%.1f".format(rp * 2.119),  false,  52)
+                                    TableCell("%.3f".format(ra * 0.197),  false,  62)
+                                }
+                            }
+                        }
+                    }
+                    Text(
+                        "Voz = (Rp·Pz + Ra·Az) / Ez  |  Ez: 1.0 ceiling supply, 0.8 floor/low-wall supply",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -298,6 +387,29 @@ private fun PropertyTableTab() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        ) {
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("About this table",
+                    style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+                Text("W (kg/kg or gr/lb): humidity ratio — mass of water vapour per kg of dry air. " +
+                    "Directly proportional to latent heat load. W × 2501 kJ/kg ≈ latent heat per kg.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("h (kJ/kg or BTU/lb): total enthalpy = sensible + latent. " +
+                    "Formula: h = 1.006·T + W·(2501 + 1.86·T). Used to size cooling coils and AHUs.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Computed using ASHRAE 2017 psychrometric equations at current site pressure. " +
+                    "Change altitude in Settings to recalculate for elevated sites.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
 
         Box(
             Modifier
@@ -512,6 +624,13 @@ private fun DuctSizingTab() {
     var arExpanded   by remember { mutableStateOf(false) }
     var result       by remember { mutableStateOf<DuctSizingResult?>(null) }
     var error        by remember { mutableStateOf<String?>(null) }
+    var convToRect   by remember { mutableStateOf(true) }
+    var convDiam     by remember { mutableStateOf(if (isIp) "12" else "300") }
+    var convW        by remember { mutableStateOf(if (isIp) "16" else "400") }
+    var convH        by remember { mutableStateOf(if (isIp) "10" else "250") }
+    var convAr       by remember { mutableStateOf(1.5) }
+    var convArExp    by remember { mutableStateOf(false) }
+    var convResult   by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(unitSystem) {
         airflowText  = if (isIp) "1000" else "500"
@@ -534,6 +653,83 @@ private fun DuctSizingTab() {
         Text("Size supply/return/exhaust ducts by equal friction or target velocity. Standard air at 20 °C, galvanized steel (ε = 0.09 mm).",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        // ── Round ↔ Rectangular Conversion ────────────────────────────────────
+        HvacSectionLabel("Round ↔ Rectangular Conversion (ASHRAE De formula)")
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            SegmentedButton(shape = SegmentedButtonDefaults.itemShape(0, 2),
+                onClick = { convToRect = true; convResult = null }, selected = convToRect) {
+                Text("Round → Rect")
+            }
+            SegmentedButton(shape = SegmentedButtonDefaults.itemShape(1, 2),
+                onClick = { convToRect = false; convResult = null }, selected = !convToRect) {
+                Text("Rect → Round")
+            }
+        }
+        if (convToRect) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                HvacField("Diameter ($dimUnit)", convDiam, { convDiam = it; convResult = null }, Modifier.weight(1f))
+                ExposedDropdownMenuBox(expanded = convArExp, onExpandedChange = { convArExp = it }, modifier = Modifier.weight(1f)) {
+                    OutlinedTextField(
+                        value = aspectRatios.find { it.first == convAr }?.second ?: "1.5:1",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Aspect Ratio") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(convArExp) },
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                    )
+                    ExposedDropdownMenu(expanded = convArExp, onDismissRequest = { convArExp = false }) {
+                        aspectRatios.forEach { (r, label) ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = { convAr = r; convArExp = false; convResult = null },
+                            )
+                        }
+                    }
+                }
+            }
+            Button(
+                onClick = {
+                    val d = convDiam.toDoubleOrNull() ?: return@Button
+                    val dMm = if (isIp) d * 25.4 else d
+                    val h = dMm * (convAr + 1.0).pow(0.25) / (1.30 * convAr.pow(0.625))
+                    val w = convAr * h
+                    convResult = if (isIp)
+                        "W × H = %.1f × %.1f in  (%.0f × %.0f mm)".format(w / 25.4, h / 25.4, w, h)
+                    else
+                        "W × H = %.0f × %.0f mm".format(w, h)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Convert Round → Rectangular") }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                HvacField("Width ($dimUnit)", convW, { convW = it; convResult = null }, Modifier.weight(1f))
+                HvacField("Height ($dimUnit)", convH, { convH = it; convResult = null }, Modifier.weight(1f))
+            }
+            Button(
+                onClick = {
+                    val w = convW.toDoubleOrNull() ?: return@Button
+                    val h = convH.toDoubleOrNull() ?: return@Button
+                    val wMm = if (isIp) w * 25.4 else w
+                    val hMm = if (isIp) h * 25.4 else h
+                    val de = 1.30 * (wMm * hMm).pow(0.625) / (wMm + hMm).pow(0.25)
+                    convResult = if (isIp)
+                        "De = %.2f in  (%.0f mm)".format(de / 25.4, de)
+                    else
+                        "De = %.0f mm".format(de)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Convert Rectangular → Round") }
+        }
+        convResult?.let {
+            Text(it,
+                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary)
+        }
+        Text("De = 1.30·(W·H)^0.625 / (W+H)^0.25  [ASHRAE Handbook Fundamentals]",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
         // Shape
         HvacSectionLabel("Duct Shape")
@@ -1108,6 +1304,17 @@ private fun RoomLoadTab() {
                     val total  = totalS + totalL
                     val shr    = totalS / total
                     val tr     = total / 3.517
+                    // ADP: intersect ESHF/GSHF line with saturation curve (binary search)
+                    val shrSlope = 1.006 * (1.0 - shr) / (2501.0 * shr)
+                    var adpLo = -15.0; var adpHi = idT - 0.05
+                    repeat(60) {
+                        val mid   = (adpLo + adpHi) / 2.0
+                        val wLine = id.w + shrSlope * (mid - idT)
+                        val wSat  = PsychroCalc.humRatioFromRelHum(mid, 1.0)
+                        if (wLine > wSat) adpLo = mid else adpHi = mid
+                    }
+                    val tAdp     = (adpLo + adpHi) / 2.0
+                    val adpState = PsychroCalc.fromDbtRh(tAdp, 100.0)
                     result = listOf(
                         "Occupant Sensible" to "%.2f kW".format(qOccS / 1000),
                         "Occupant Latent"   to "%.2f kW".format(qOccL / 1000),
@@ -1122,6 +1329,12 @@ private fun RoomLoadTab() {
                         "Total Latent"      to "%.2f kW".format(totalL),
                         "Total Load"        to "%.2f kW  /  %.2f TR".format(total, tr),
                         "SHR"               to "%.3f".format(shr),
+                        "---"               to "",
+                        "ESHF (= SHR here)" to "%.3f  (no separate OA in this model)".format(shr),
+                        "Rec. ADP"          to "%.1f %s".format(uc.displayTemp(tAdp, unitSystem), tUnit),
+                        "ADP WBT"           to "%.1f %s".format(uc.displayTemp(adpState.wbt, unitSystem), tUnit),
+                        "ADP note"          to "Coil leaving air ≤ %.1f %s".format(
+                            uc.displayTemp(tAdp + 2.0, unitSystem), tUnit),
                     )
                 }.onFailure { e -> error = e.message ?: "Calculation error" }
             },
@@ -1134,7 +1347,10 @@ private fun RoomLoadTab() {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Room Cooling Load", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     HorizontalDivider()
-                    rows.forEach { (k, v) -> HvacResultRow(k, v) }
+                    rows.forEach { (k, v) ->
+                        if (k == "---") HorizontalDivider()
+                        else HvacResultRow(k, v)
+                    }
                 }
             }
         }
