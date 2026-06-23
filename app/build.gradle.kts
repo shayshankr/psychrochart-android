@@ -1,8 +1,15 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.play.publisher)
+}
+
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) load(f.inputStream())
 }
 
 android {
@@ -13,8 +20,8 @@ android {
         applicationId = "com.psychrochart.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "16.4.3"
+        versionCode = 27
+        versionName = "16.4.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -25,9 +32,9 @@ android {
     signingConfigs {
         create("release") {
             storeFile = rootProject.file("psychrochart-release.jks")
-            storePassword = "psychrochart2024"
-            keyAlias = "psychrochart"
-            keyPassword = "psychrochart2024"
+            storePassword = localProps.getProperty("STORE_PASSWORD")
+            keyAlias = localProps.getProperty("KEY_ALIAS")
+            keyPassword = localProps.getProperty("KEY_PASSWORD")
         }
     }
 
