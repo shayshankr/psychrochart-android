@@ -29,7 +29,7 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 fun PsychroChartTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val colorScheme = when {

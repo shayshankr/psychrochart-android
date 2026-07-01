@@ -16,7 +16,6 @@ import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.DeviceHub
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.foundation.selection.selectable
@@ -50,95 +49,9 @@ import com.psychrochart.app.ui.screens.StatePointScreen
 import com.psychrochart.app.ui.theme.PsychroChartTheme
 import com.psychrochart.app.viewmodel.MainViewModel
 
-private const val PREFS_NAME       = "psychro_prefs"
-private const val KEY_ONBOARDED    = "onboarded"
-private const val KEY_LAST_VERSION = "last_version_code"
-
-// ── Changelog ─────────────────────────────────────────────────────────────────
-
-private data class VersionEntry(val version: String, val changes: List<String>)
-
-private val changelog = listOf(
-    VersionEntry("16.2.0", listOf(
-        "App fully rebranded as HVAC Suite — name updated throughout the interface",
-        "New app icon: teal background with airflow waves and thermometer",
-        "Saved chart images now stored in the HVAC Suite folder in your gallery",
-    )),
-    VersionEntry("16.1.0", listOf(
-        "App renamed from Psychro Chart to HVAC Suite on Play Store",
-    )),
-    VersionEntry("16.0.0", listOf(
-        "Pipe Sizing Calculator — CHW, HHW, condenser water; equal-friction or velocity method",
-        "Fan Laws Calculator — affinity laws Q∝N, ΔP∝N², P∝N³; VFD frequency and power saving %",
-        "Economizer Analyser — enthalpy & dry-bulb free cooling check; mixed-air table at 0–100% OA",
-        "Room Load Estimator — occupants, lighting, equipment, solar gain, conduction, infiltration",
-        "VRF Capacity Correction — temperature, piping length, height correction factors",
-        "Refrigerant Quick Reference — saturation pressure tables for R-410A, R-32, R-22, R-134a, R-600a, R-290",
-        "Duct Sizing Calculator — round & rectangular; equal friction or velocity; NC noise level estimate",
-        "Monsoon / dehumidification design condition in city picker (ASHRAE 1% dew-point + coincident DBT)",
-        "Favourite cities — star toggle persists between sessions; favourites sorted to top",
-        "Dark mode chart — teal FAB toggles chart canvas between light and dark",
-        "Process undo — FAB on chart screen removes the last plotted state point",
-    )),
-    VersionEntry("15.0.0", listOf(
-        "SI / IP unit toggle — switch between °C/kJ/kg and °F/BTU/lb/gr/lb app-wide",
-        "Altitude / elevation input with ICAO pressure formula (affects all calculations)",
-        "Quick altitude presets: Sea Level, Denver, Calgary, Mexico City, Bogotá",
-        "ASHRAE city picker — fill outdoor design DBT/WBT from 40+ cities in one tap",
-        "Named state points — label any plotted point (OA, RA, SA, Room…)",
-        "ASHRAE 55 comfort zone overlay on psychrometric chart (toggleable green polygon)",
-        "New process: Fan Heat Rise — calculates temperature rise from fan total pressure & efficiency",
-        "New process: Energy Recovery (ERV) — sensible & latent effectiveness model",
-        "New process: Cooling Coil (ADP/BF) — apparatus dew-point and bypass factor",
-        "HVAC Tools tab: SHR line & supply air state from room sensible/latent loads",
-        "HVAC Tools tab: ASHRAE 62.1 ventilation calculator (12 zone categories)",
-        "HVAC Tools tab: Psychrometric property table (DBT × RH grid, scrollable)",
-        "HVAC Tools tab: Cooling tower performance (approach, range, effectiveness)",
-        "Copy to clipboard button on all result cards",
-        "Settings gear icon in toolbar for quick unit & altitude access",
-    )),
-    VersionEntry("14.0.0", listOf(
-        "Air quantity (kg/s) field on sensible heating, cooling, and cooling & dehumidification processes",
-        "Total load displayed in kW and TR in process results",
-        "Adiabatic mixing: State 2 now accepts WBT, DPT, W, or h as second input",
-        "Both mass flows (m1 and m2) are now user-specified in adiabatic mixing",
-        "Chart state-point and process arrow labels rotated vertically to prevent overlap",
-        "Y-axis humidity ratio label corrected to upward orientation",
-    )),
-    VersionEntry("13.0.0", listOf(
-        "What's New changelog screen added (this screen!)",
-        "Auto-shows after each app update with version-by-version bullet points",
-        "Accessible manually via the info icon → What's New",
-    )),
-    VersionEntry("12.0.0", listOf(
-        "In-app onboarding guide shown on first launch",
-        "Help sheet accessible anytime via the info icon in the toolbar",
-        "What's New screen shown automatically after each update",
-    )),
-    VersionEntry("11.0.0", listOf(
-        "Fixed 4 critical bugs in AHU chain and psychrometric calculations",
-        "Improved accuracy of enthalpy, humidity ratio, and saturation curve",
-    )),
-    VersionEntry("10.0.0", listOf(
-        "Redesigned chart with toggleable RH, WBT, Enthalpy, and Specific Volume layers",
-        "Curves clipped cleanly to plot area with edge labels",
-        "Tap any point on the chart to inspect all psychrometric properties",
-        "Pinch-to-zoom and pan gesture support",
-    )),
-    VersionEntry("9.0.0", listOf(
-        "Synced chart improvements from web app",
-        "Save chart as image feature added",
-    )),
-    VersionEntry("8.0.0", listOf(
-        "Overhauled chart axes with proper tick labels, titles, and minor grid lines",
-        "Right Y-axis added for improved readability",
-    )),
-    VersionEntry("7.0.0", listOf(
-        "Specific enthalpy (h) added as a secondary input option for state point calculation",
-        "AHU Chain tab introduced for multi-step air handling unit simulation",
-        "Synced latest features from companion web app",
-    )),
-)
+private const val PREFS_NAME    = "psychro_prefs"
+private const val KEY_ONBOARDED = "onboarded"
+private const val KEY_DARK_MODE = "dark_mode"
 
 // ── Activity ──────────────────────────────────────────────────────────────────
 
@@ -147,7 +60,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            PsychroChartTheme {
+            val darkMode by AppSettings.darkMode.collectAsState()
+
+            PsychroChartTheme(darkTheme = darkMode) {
                 val navController = rememberNavController()
                 val vm: MainViewModel = viewModel()
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -156,30 +71,22 @@ class MainActivity : ComponentActivity() {
 
                 var showHelp       by remember { mutableStateOf(false) }
                 var showOnboarding by remember { mutableStateOf(false) }
-                var showWhatsNew   by remember { mutableStateOf(false) }
                 var showSettings   by remember { mutableStateOf(false) }
 
+                // Load saved preferences on startup
                 LaunchedEffect(Unit) {
                     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    val pkg = context.packageManager.getPackageInfo(context.packageName, 0)
-                    val currentCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
-                        pkg.longVersionCode.toInt()
-                    else
-                        @Suppress("DEPRECATION") pkg.versionCode
-
-                    when {
-                        !prefs.getBoolean(KEY_ONBOARDED, false) -> {
-                            showOnboarding = true
-                            prefs.edit()
-                                .putBoolean(KEY_ONBOARDED, true)
-                                .putInt(KEY_LAST_VERSION, currentCode)
-                                .apply()
-                        }
-                        currentCode > prefs.getInt(KEY_LAST_VERSION, 0) -> {
-                            showWhatsNew = true
-                            prefs.edit().putInt(KEY_LAST_VERSION, currentCode).apply()
-                        }
+                    AppSettings.setDarkMode(prefs.getBoolean(KEY_DARK_MODE, true))
+                    if (!prefs.getBoolean(KEY_ONBOARDED, false)) {
+                        showOnboarding = true
+                        prefs.edit().putBoolean(KEY_ONBOARDED, true).apply()
                     }
+                }
+
+                // Persist dark mode whenever it changes
+                LaunchedEffect(darkMode) {
+                    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    prefs.edit().putBoolean(KEY_DARK_MODE, darkMode).apply()
                 }
 
                 Scaffold(
@@ -234,7 +141,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // ── First-launch onboarding dialog ─────────────────────────────
+                // ── First-launch onboarding ───────────────────────────────────
                 if (showOnboarding) {
                     AlertDialog(
                         onDismissRequest = {},
@@ -259,17 +166,10 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                // ── What's New bottom sheet ────────────────────────────────────
-                if (showWhatsNew) {
-                    ModalBottomSheet(onDismissRequest = { showWhatsNew = false }) {
-                        WhatsNewSheetContent()
-                    }
-                }
-
                 // ── Help bottom sheet ──────────────────────────────────────────
                 if (showHelp) {
                     ModalBottomSheet(onDismissRequest = { showHelp = false }) {
-                        HelpSheetContent(onShowWhatsNew = { showHelp = false; showWhatsNew = true })
+                        HelpSheetContent()
                     }
                 }
 
@@ -313,79 +213,10 @@ private fun OnboardingStep(number: String, tab: String, description: String) {
     }
 }
 
-// ── What's New ────────────────────────────────────────────────────────────────
-
-@Composable
-private fun WhatsNewSheetContent() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp)
-            .padding(bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Default.NewReleases,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(26.dp))
-            Text("What's New",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold)
-        }
-        HorizontalDivider()
-
-        changelog.forEachIndexed { index, entry ->
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(entry.version,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary)
-                    if (index == 0) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            shape = MaterialTheme.shapes.small,
-                        ) {
-                            Text("LATEST",
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-                entry.changes.forEach { change ->
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Text("•",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold)
-                        Text(change,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-            if (index < changelog.lastIndex) HorizontalDivider(thickness = 0.5.dp)
-        }
-    }
-}
-
 // ── Help ──────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun HelpSheetContent(onShowWhatsNew: () -> Unit) {
+private fun HelpSheetContent() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -394,22 +225,9 @@ private fun HelpSheetContent(onShowWhatsNew: () -> Unit) {
             .padding(bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("How to use HVAC Suite",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold)
-            TextButton(onClick = onShowWhatsNew) {
-                Icon(Icons.Default.NewReleases,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("What's New", style = MaterialTheme.typography.labelMedium)
-            }
-        }
+        Text("How to use HVAC Suite",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold)
         HorizontalDivider()
         HelpSection(
             icon = Icons.Default.Thermostat,
@@ -460,6 +278,7 @@ private fun HelpSheetContent(onShowWhatsNew: () -> Unit) {
 private fun SettingsSheetContent() {
     val unitSystem by AppSettings.unitSystem.collectAsState()
     val altitudeM  by AppSettings.altitudeM.collectAsState()
+    val darkMode   by AppSettings.darkMode.collectAsState()
     val uc = UnitConverter
 
     var altText by remember(unitSystem) {
@@ -475,6 +294,32 @@ private fun SettingsSheetContent() {
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         Text("Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        HorizontalDivider()
+
+        // ── Appearance ─────────────────────────────────────────────────────────
+        Text("Appearance", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text(
+                    if (darkMode) "Dark Mode" else "Light Mode",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    if (darkMode) "Switch to light mode" else "Switch to dark mode",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = darkMode,
+                onCheckedChange = { AppSettings.setDarkMode(it) },
+            )
+        }
         HorizontalDivider()
 
         // ── Unit system ────────────────────────────────────────────────────────
