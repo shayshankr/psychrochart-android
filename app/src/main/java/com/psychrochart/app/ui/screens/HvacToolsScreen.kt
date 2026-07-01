@@ -6,7 +6,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
+import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.ln
+import kotlin.math.log10
 import kotlin.math.pow
 import kotlin.math.sqrt
 import androidx.compose.foundation.layout.*
@@ -14,7 +17,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Calculate
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -53,6 +58,8 @@ fun HvacToolsScreen(vm: MainViewModel) {
         "SHR / Loads", "Ventilation", "Property Table", "Cooling Tower",
         "Duct Sizing", "Pipe Sizing", "Fan Laws", "Economizer",
         "Room Load", "VRF", "Refrigerant",
+        "PMV/Comfort", "VAV/Reheat", "Zone Summary",
+        "Pump Sizing", "Coil Select", "Equip. Check", "CT Water",
     )
     var selectedTab by remember { mutableIntStateOf(0) }
 
@@ -79,6 +86,13 @@ fun HvacToolsScreen(vm: MainViewModel) {
                 8 -> RoomLoadTab()
                 9 -> VrfTab()
                10 -> RefrigerantTab()
+               11 -> PmvTab()
+               12 -> VavReheatTab()
+               13 -> ZoneSummaryTab()
+               14 -> PumpSizingTab()
+               15 -> CoilSelectTab()
+               16 -> EquipCheckTab()
+               17 -> CtWaterTab()
             }
         }
     }
@@ -1598,4 +1612,984 @@ private fun RefTableCell(text: String, isHeader: Boolean, widthDp: Int) {
         fontWeight = if (isHeader) FontWeight.Bold else FontWeight.Normal,
         maxLines = 1,
     )
+}
+
+// ── Tab 12: PMV / Thermal Comfort (ASHRAE 55 / ISO 7730) ─────────────────────
+
+@Composable
+private fun PmvTab() {
+    val unitSystem by AppSettings.unitSystem.collectAsState()
+    val uc = UnitConverter
+    val tUnit = uc.tempUnit(unitSystem)
+
+    val activities = listOf(
+        "Sleeping / reclining"           to 0.8,
+        "Seated, relaxed (office)"       to 1.0,
+        "Seated, light work"             to 1.1,
+        "Standing, light activity"       to 1.2,
+        "Walking 3 km/h"                 to 2.0,
+        "Walking 5 km/h"                 to 2.6,
+        "Moderate exercise"              to 3.0,
+    )
+    val clothings = listOf(
+        "Naked"                                     to 0.0,
+        "Light summer (T-shirt, shorts)"            to 0.3,
+        "Typical summer (light shirt, trousers)"    to 0.5,
+        "Typical office (shirt, suit jacket)"       to 1.0,
+        "Typical winter (suit + coat)"              to 1.5,
+        "Heavy winter (overcoat, boots)"            to 2.0,
+    )
+
+    var ta     by remember { mutableStateOf(uc.defaultTemp(23.0, unitSystem)) }
+    var tr     by remember { mutableStateOf(uc.defaultTemp(24.0, unitSystem)) }
+    var va     by remember { mutableStateOf("0.2") }
+    var rh     by remember { mutableStateOf("50") }
+    var metIdx by remember { mutableIntStateOf(1) }
+    var cloIdx by remember { mutableIntStateOf(2) }
+    var actExp by remember { mutableStateOf(false) }
+    var cloExp by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<PmvCalc.Result?>(null) }
+    var error  by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(unitSystem) {
+        ta = uc.defaultTemp(23.0, unitSystem); tr = uc.defaultTemp(24.0, unitSystem)
+        result = null; error = null
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("ASHRAE 55 Thermal Comfort — PMV / PPD",
+            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("ISO 7730 Fanger model. PMV: −3 (cold) → +3 (hot). ASHRAE 55 requires |PMV| ≤ 0.5 (Cat. B) for most occupied spaces.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        HvacSectionLabel("Air Conditions")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HvacField("Air Temp ($tUnit)", ta, { ta = it }, Modifier.weight(1f))
+            HvacField("Mean Radiant Temp ($tUnit)", tr, { tr = it }, Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HvacField("Air Velocity (m/s)", va, { va = it }, Modifier.weight(1f))
+            HvacField("Relative Humidity (%)", rh, { rh = it }, Modifier.weight(1f))
+        }
+        Text("MRT ≈ air temp for well-insulated rooms. Min velocity: 0.1 m/s (still air).",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        HvacSectionLabel("Occupant Parameters")
+        ExposedDropdownMenuBox(expanded = actExp, onExpandedChange = { actExp = it }) {
+            OutlinedTextField(
+                value = "${activities[metIdx].first}  (${activities[metIdx].second} met)",
+                onValueChange = {}, readOnly = true,
+                label = { Text("Activity / Metabolic Rate") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(actExp) },
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+            )
+            ExposedDropdownMenu(expanded = actExp, onDismissRequest = { actExp = false }) {
+                activities.forEachIndexed { i, (name, m) ->
+                    DropdownMenuItem(text = { Text("$name  ($m met)") }, onClick = { metIdx = i; actExp = false })
+                }
+            }
+        }
+        ExposedDropdownMenuBox(expanded = cloExp, onExpandedChange = { cloExp = it }) {
+            OutlinedTextField(
+                value = "${clothings[cloIdx].first}  (${clothings[cloIdx].second} clo)",
+                onValueChange = {}, readOnly = true,
+                label = { Text("Clothing Insulation Level") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(cloExp) },
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+            )
+            ExposedDropdownMenu(expanded = cloExp, onDismissRequest = { cloExp = false }) {
+                clothings.forEachIndexed { i, (name, c) ->
+                    DropdownMenuItem(text = { Text("$name  ($c clo)") }, onClick = { cloIdx = i; cloExp = false })
+                }
+            }
+        }
+
+        Button(
+            onClick = {
+                error = null; result = null
+                runCatching {
+                    val taC = uc.inputTemp(ta.toDouble(), unitSystem)
+                    val trC = uc.inputTemp(tr.toDouble(), unitSystem)
+                    PmvCalc.calculate(
+                        ta  = taC,
+                        tr  = trC,
+                        va  = va.toDouble().coerceAtLeast(0.0),
+                        rh  = rh.toDouble(),
+                        met = activities[metIdx].second,
+                        clo = clothings[cloIdx].second,
+                    )
+                }.onSuccess { result = it }.onFailure { e -> error = e.message ?: "Calculation error" }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Icon(Icons.Default.Calculate, null); Spacer(Modifier.width(8.dp)); Text("Calculate PMV / PPD") }
+
+        error?.let { ErrorCard(it) }
+
+        result?.let { r ->
+            val pmvColor = when {
+                abs(r.pmv) <= 0.2 -> androidx.compose.ui.graphics.Color(0xFF2E7D32)
+                abs(r.pmv) <= 0.5 -> MaterialTheme.colorScheme.primary
+                abs(r.pmv) <= 0.7 -> androidx.compose.ui.graphics.Color(0xFFF57F17)
+                else               -> MaterialTheme.colorScheme.error
+            }
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Comfort Result", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("PMV  %.2f".format(r.pmv),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold, color = pmvColor)
+                    }
+                    HorizontalDivider()
+                    HvacResultRow("Thermal Sensation", PmvCalc.sensation(r.pmv))
+                    HvacResultRow("PPD", "%.1f %%  dissatisfied".format(r.ppd))
+                    HvacResultRow("ISO 7730 Category", PmvCalc.category(r.pmv))
+                    HorizontalDivider()
+                    HvacResultRow("Clothing surface temp", "%.1f %s".format(uc.displayTemp(r.tClothes, unitSystem), tUnit))
+                    HvacResultRow("Convective coefficient hc", "%.2f W/m²K".format(r.hConv))
+                    HorizontalDivider()
+                    Text(
+                        "ASHRAE 55-2023: Cat A |PMV|<0.2 · Cat B |PMV|<0.5 · Cat C |PMV|<0.7",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                    )
+                }
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("ASHRAE 55 Comfort Zones (1.0 met, 0.5 clo, still air)",
+                    style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+                Text("Summer: 23–27°C  ·  Winter: 20–23.5°C  ·  Max W = 0.012 kg/kg",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Enable 'ASHRAE 55' layer on the Chart tab to see the comfort zone plotted.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+// ── Tab 13: VAV Box / Reheat Coil Sizing ──────────────────────────────────────
+
+@Composable
+private fun VavReheatTab() {
+    val unitSystem by AppSettings.unitSystem.collectAsState()
+    val uc   = UnitConverter
+    val tUnit = uc.tempUnit(unitSystem)
+    val isIp  = unitSystem == UnitSystem.IP
+
+    var roomCool  by remember { mutableStateOf(uc.defaultTemp(26.0, unitSystem)) }
+    var supCool   by remember { mutableStateOf(uc.defaultTemp(13.0, unitSystem)) }
+    var qCool     by remember { mutableStateOf("5.0") }
+    var roomHeat  by remember { mutableStateOf(uc.defaultTemp(21.0, unitSystem)) }
+    var qHeat     by remember { mutableStateOf("2.0") }
+    var minPct    by remember { mutableStateOf("30") }
+    var result    by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var error     by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(unitSystem) {
+        roomCool = uc.defaultTemp(26.0, unitSystem); supCool = uc.defaultTemp(13.0, unitSystem)
+        roomHeat = uc.defaultTemp(21.0, unitSystem); result = null; error = null
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("VAV Box / Reheat Coil Sizing",
+            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("Calculates primary design airflow, minimum VAV position, and the electric or hot-water reheat coil capacity needed to maintain heating setpoint.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        HvacSectionLabel("Cooling Design")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HvacField("Room DBT ($tUnit)", roomCool, { roomCool = it }, Modifier.weight(1f))
+            HvacField("AHU Supply DBT ($tUnit)", supCool, { supCool = it }, Modifier.weight(1f))
+        }
+        HvacField("Zone Sensible Cooling Load (kW)", qCool, { qCool = it })
+        Text("Typical cooling supply: 12–14 °C (54–57 °F).",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        HvacSectionLabel("Heating Design")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HvacField("Room Heating Setpoint ($tUnit)", roomHeat, { roomHeat = it }, Modifier.weight(1f))
+            HvacField("Zone Heating Load (kW)", qHeat, { qHeat = it }, Modifier.weight(1f))
+        }
+
+        HvacSectionLabel("VAV Minimum Position")
+        HvacField("Minimum Flow Fraction (%)", minPct, { minPct = it })
+        Text("ASHRAE 90.1 / local code: typically 20–30 % for heating-dominant zones. Ventilation minimum may govern.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        Button(
+            onClick = {
+                error = null; result = null
+                runCatching {
+                    val rcC  = uc.inputTemp(roomCool.toDouble(), unitSystem)
+                    val scC  = uc.inputTemp(supCool.toDouble(), unitSystem)
+                    val rhC  = uc.inputTemp(roomHeat.toDouble(), unitSystem)
+                    val qs   = qCool.toDouble()
+                    val qh   = qHeat.toDouble()
+                    val fMin = minPct.toDouble() / 100.0
+                    require(rcC > scC) { "Room DBT (cooling) must be above supply DBT." }
+                    require(fMin in 0.05..1.0) { "Minimum fraction must be 5–100%." }
+                    val cp      = 1.006
+                    val dtCool  = rcC - scC
+                    val mMax    = qs / (cp * dtCool)       // kg/s
+                    val mMin    = mMax * fMin
+                    val vMax    = mMax * 0.835             // m³/s  (specific vol ≈ 0.835 at ~23°C)
+                    val vMin    = mMin * 0.835
+                    val tSupHeat = rhC + qh / (mMin * cp)
+                    val qReheat  = (mMin * cp * (tSupHeat - scC)).coerceAtLeast(0.0)
+                    result = listOf(
+                        "Cooling ΔT (Room − Supply)" to "%.1f Δ%s".format(if (isIp) dtCool * 1.8 else dtCool, tUnit),
+                        "Design mass flow" to "%.3f kg/s  (%.1f %s)".format(mMax, uc.displayFlow(mMax, unitSystem), uc.flowUnit(unitSystem)),
+                        "Design volume flow" to "%.3f m³/s  =  %.0f L/s  =  %.0f CFM".format(vMax, vMax * 1000, vMax * 2118.88),
+                        "---" to "",
+                        "Min flow fraction" to "%.0f%%".format(fMin * 100),
+                        "Min mass flow" to "%.3f kg/s  (%.1f %s)".format(mMin, uc.displayFlow(mMin, unitSystem), uc.flowUnit(unitSystem)),
+                        "Min volume flow" to "%.3f m³/s  =  %.0f L/s  =  %.0f CFM".format(vMin, vMin * 1000, vMin * 2118.88),
+                        "---" to "",
+                        "Required supply temp (heating)" to "%.1f %s".format(uc.displayTemp(tSupHeat, unitSystem), tUnit),
+                        "Reheat coil capacity" to "%.2f kW  =  %.0f BTU/hr  =  %.3f TR".format(qReheat, uc.kwToBtuh(qReheat), qReheat / 3.517),
+                        "Sensible cooling at min flow" to "%.2f kW".format(mMin * cp * dtCool),
+                    )
+                }.onFailure { e -> error = e.message ?: "Calculation error" }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Icon(Icons.Default.Calculate, null); Spacer(Modifier.width(8.dp)); Text("Calculate VAV / Reheat") }
+
+        error?.let { ErrorCard(it) }
+        result?.let { rows ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("VAV / Reheat Results", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    HorizontalDivider()
+                    rows.forEach { (k, v) ->
+                        if (k == "---") HorizontalDivider() else HvacResultRow(k, v)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Tab 14: Multi-Zone Load Summary ───────────────────────────────────────────
+
+private data class ZoneEntry(
+    val name: String,
+    val areaM2: Double,
+    val sensKw: Double,
+    val latKw: Double,
+)
+
+@Composable
+private fun ZoneSummaryTab() {
+    val unitSystem by AppSettings.unitSystem.collectAsState()
+    val uc   = UnitConverter
+    val isIp  = unitSystem == UnitSystem.IP
+    val aUnit = if (isIp) "ft²" else "m²"
+
+    val zones = remember { mutableStateListOf<ZoneEntry>() }
+    var zoneName  by remember { mutableStateOf("Zone 1") }
+    var zoneArea  by remember { mutableStateOf("100") }
+    var zoneSens  by remember { mutableStateOf("5.0") }
+    var zoneLat   by remember { mutableStateOf("1.5") }
+    var addError  by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("Multi-Zone Building Load Summary",
+            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("Add zones one by one. Building totals, peak TR, and overall SHR are calculated automatically.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        HvacSectionLabel("Add Zone")
+        HvacField("Zone Name", zoneName, { zoneName = it })
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HvacField("Floor Area ($aUnit)", zoneArea, { zoneArea = it }, Modifier.weight(1f))
+            HvacField("Sensible Load (kW)", zoneSens, { zoneSens = it }, Modifier.weight(1f))
+        }
+        HvacField("Latent Load (kW)", zoneLat, { zoneLat = it })
+        addError?.let { ErrorCard(it) }
+
+        Button(
+            onClick = {
+                addError = null
+                val area = zoneArea.toDoubleOrNull()
+                val qs   = zoneSens.toDoubleOrNull()
+                val ql   = zoneLat.toDoubleOrNull()
+                if (area == null || qs == null || ql == null || area <= 0 || qs <= 0 || ql < 0) {
+                    addError = "Enter valid positive values."; return@Button
+                }
+                val aM2 = if (isIp) uc.ft2ToM2(area) else area
+                zones.add(ZoneEntry(zoneName.trim().ifBlank { "Zone ${zones.size + 1}" }, aM2, qs, ql))
+                zoneName = "Zone ${zones.size + 1}"
+                zoneArea = "100"; zoneSens = "5.0"; zoneLat = "1.5"
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Add Zone") }
+
+        if (zones.isNotEmpty()) {
+            HvacSectionLabel("Zones (${zones.size})")
+            zones.forEachIndexed { i, z ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(z.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            val aDisp = if (isIp) uc.m2ToFt2(z.areaM2) else z.areaM2
+                            Text(
+                                "%.0f $aUnit  ·  S=%.2f kW  ·  L=%.2f kW  ·  Total=%.2f kW  (%.3f TR)".format(
+                                    aDisp, z.sensKw, z.latKw, z.sensKw + z.latKw, (z.sensKw + z.latKw) / 3.517),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        IconButton(onClick = { zones.removeAt(i) }) {
+                            Icon(Icons.Default.Delete, "Remove zone",
+                                tint = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
+
+            // Building totals
+            val totalSens  = zones.sumOf { it.sensKw }
+            val totalLat   = zones.sumOf { it.latKw }
+            val totalKw    = totalSens + totalLat
+            val totalTr    = totalKw / 3.517
+            val totalArea  = zones.sumOf { it.areaM2 }
+            val shr        = if (totalKw > 0) totalSens / totalKw else 0.0
+            val wPerM2     = if (totalArea > 0) totalKw * 1000 / totalArea else 0.0
+            val trPer100m2 = if (totalArea > 0) totalTr / (totalArea / 100.0) else 0.0
+
+            HvacSectionLabel("Building Summary")
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Building Totals  (${zones.size} zones)",
+                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    HorizontalDivider()
+                    HvacResultRow("Total Sensible Load", "%.2f kW".format(totalSens))
+                    HvacResultRow("Total Latent Load",   "%.2f kW".format(totalLat))
+                    HvacResultRow("Total Cooling Load",  "%.2f kW  /  %.2f TR".format(totalKw, totalTr))
+                    HvacResultRow("Building SHR",        "%.3f".format(shr))
+                    HorizontalDivider()
+                    val areaDisp = if (isIp) uc.m2ToFt2(totalArea) else totalArea
+                    HvacResultRow("Total Floor Area",   "%.0f $aUnit".format(areaDisp))
+                    HvacResultRow("Load Density",
+                        if (isIp) "%.1f BTU/(hr·ft²)".format(uc.kwToBtuh(totalKw) / uc.m2ToFt2(totalArea))
+                        else      "%.0f W/m²".format(wPerM2))
+                    HvacResultRow("Cooling Intensity",
+                        if (isIp) "%.3f TR/100ft²".format(totalTr / (uc.m2ToFt2(totalArea) / 100.0))
+                        else      "%.2f TR/100m²".format(trPer100m2))
+                }
+            }
+
+            OutlinedButton(
+                onClick = { zones.clear(); zoneName = "Zone 1" },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            ) { Text("Clear All Zones") }
+        }
+    }
+}
+
+// ── Tab 15: Pump Sizing / System Head ─────────────────────────────────────────
+
+@Composable
+private fun PumpSizingTab() {
+    val unitSystem by AppSettings.unitSystem.collectAsState()
+    val isIp = unitSystem == UnitSystem.IP
+    val flowUnit = if (isIp) "GPM" else "L/s"
+    val headUnit = if (isIp) "ft H₂O" else "m H₂O"
+    val lenUnit  = if (isIp) "ft"     else "m"
+    val dimUnit  = if (isIp) "in"     else "mm"
+
+    var fluidIdx  by remember { mutableIntStateOf(0) }
+    var matIdx    by remember { mutableIntStateOf(1) }
+    var nbIdx     by remember { mutableIntStateOf(5) }
+    var flowText  by remember { mutableStateOf(if (isIp) "30" else "2.0") }
+    var eqLen     by remember { mutableStateOf(if (isIp) "300" else "100") }
+    var staticHd  by remember { mutableStateOf("5") }
+    var fluidExp  by remember { mutableStateOf(false) }
+    var matExp    by remember { mutableStateOf(false) }
+    var nbExp     by remember { mutableStateOf(false) }
+    var result    by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var error     by remember { mutableStateOf<String?>(null) }
+
+    val stdNb = intArrayOf(15, 20, 25, 32, 40, 50, 65, 80, 100, 125, 150, 200, 250, 300)
+
+    LaunchedEffect(unitSystem) {
+        flowText = if (isIp) "30" else "2.0"
+        eqLen    = if (isIp) "300" else "100"
+        result = null; error = null
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("Pump Sizing / System Head",
+            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("Calculates system head from Darcy-Weisbach. Select the pipe NB already chosen in Pipe Sizing tab, enter total equivalent pipe length (pipes + fittings as equiv. length).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        HvacSectionLabel("Fluid & Pipe")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            ExposedDropdownMenuBox(expanded = fluidExp, onExpandedChange = { fluidExp = it }, modifier = Modifier.weight(1f)) {
+                OutlinedTextField(
+                    value = PipeFluid.entries[fluidIdx].label, onValueChange = {}, readOnly = true,
+                    label = { Text("Fluid") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(fluidExp) },
+                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(), singleLine = true,
+                )
+                ExposedDropdownMenu(expanded = fluidExp, onDismissRequest = { fluidExp = false }) {
+                    PipeFluid.entries.forEachIndexed { i, f ->
+                        DropdownMenuItem(text = { Text(f.label) }, onClick = { fluidIdx = i; fluidExp = false; result = null })
+                    }
+                }
+            }
+            ExposedDropdownMenuBox(expanded = matExp, onExpandedChange = { matExp = it }, modifier = Modifier.weight(1f)) {
+                OutlinedTextField(
+                    value = PipeMaterial.entries[matIdx].label, onValueChange = {}, readOnly = true,
+                    label = { Text("Material") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(matExp) },
+                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(), singleLine = true,
+                )
+                ExposedDropdownMenu(expanded = matExp, onDismissRequest = { matExp = false }) {
+                    PipeMaterial.entries.forEachIndexed { i, m ->
+                        DropdownMenuItem(text = { Text(m.label) }, onClick = { matIdx = i; matExp = false; result = null })
+                    }
+                }
+            }
+        }
+        ExposedDropdownMenuBox(expanded = nbExp, onExpandedChange = { nbExp = it }) {
+            val nbDisp = if (isIp) "NB ${stdNb[nbIdx]} mm  (%.2f in)".format(stdNb[nbIdx] / 25.4) else "NB ${stdNb[nbIdx]} mm"
+            OutlinedTextField(
+                value = nbDisp, onValueChange = {}, readOnly = true,
+                label = { Text("Pipe Nominal Bore") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(nbExp) },
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+            )
+            ExposedDropdownMenu(expanded = nbExp, onDismissRequest = { nbExp = false }) {
+                stdNb.forEachIndexed { i, nb ->
+                    val lbl = if (isIp) "NB $nb mm  (%.2f in)".format(nb / 25.4) else "NB $nb mm"
+                    DropdownMenuItem(text = { Text(lbl) }, onClick = { nbIdx = i; nbExp = false; result = null })
+                }
+            }
+        }
+
+        HvacSectionLabel("System Inputs")
+        HvacField("Flow Rate ($flowUnit)", flowText, { flowText = it })
+        HvacField("Total Equivalent Length ($lenUnit)", eqLen, { eqLen = it })
+        Text("Include straight pipe + equivalent lengths of all fittings, valves, and coils.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        HvacField("Static Head / Elevation ($headUnit)", staticHd, { staticHd = it })
+        Text("Height the pump must lift against. Use 0 for a closed loop.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        Button(
+            onClick = {
+                error = null; result = null
+                runCatching {
+                    val fluid  = PipeFluid.entries[fluidIdx]
+                    val mat    = PipeMaterial.entries[matIdx]
+                    val nbMm   = stdNb[nbIdx].toDouble()
+                    val d      = nbMm * 1e-3
+                    val qRaw   = flowText.toDouble()
+                    val lenRaw = eqLen.toDouble()
+                    val hdRaw  = staticHd.toDouble()
+                    val qLs    = if (isIp) qRaw * 0.0630902 else qRaw          // → L/s
+                    val lenM   = if (isIp) lenRaw * 0.3048 else lenRaw         // → m
+                    val hdM    = if (isIp) hdRaw * 0.3048 else hdRaw           // → m
+                    val q      = qLs * 1e-3                                     // m³/s
+                    val area   = Math.PI * d * d / 4.0
+                    val v      = q / area
+                    val re     = fluid.rho * v * d / fluid.mu
+                    val eps    = mat.eps
+                    val arg    = eps / (3.7 * d) + 5.74 / re.pow(0.9)
+                    val f      = 0.25 / log10(arg).pow(2)
+                    val dpPerM = f * fluid.rho * v * v / (2.0 * d)             // Pa/m
+                    val dpTotal = dpPerM * lenM                                 // Pa
+                    val rhoG   = fluid.rho * 9.81
+                    val frictionHead = dpTotal / rhoG                           // m H₂O
+                    val totalHead    = frictionHead + hdM
+                    val powerKw      = fluid.rho * q * 9.81 * totalHead / 1000.0
+                    val dispFric = if (isIp) frictionHead / 0.3048 else frictionHead
+                    val dispStat = if (isIp) hdM / 0.3048 else hdM
+                    val dispTot  = if (isIp) totalHead / 0.3048 else totalHead
+                    val dispVel  = if (isIp) v * 196.85 else v
+                    val velUnit2 = if (isIp) "FPM" else "m/s"
+                    result = listOf(
+                        "Pipe NB" to "${stdNb[nbIdx]} mm" + if (isIp) "  (%.2f in)".format(stdNb[nbIdx] / 25.4) else "",
+                        "Flow velocity" to "%.2f $velUnit2".format(dispVel),
+                        "Reynolds number" to "%.0f".format(re),
+                        "Darcy friction factor" to "%.5f".format(f),
+                        "Friction loss rate" to "%.1f Pa/m  (%.3f ${ if (isIp) "ft/100ft" else "Pa/m" })".format(dpPerM, if (isIp) dpPerM / 98.06 else dpPerM),
+                        "---" to "",
+                        "Friction head" to "%.2f $headUnit".format(dispFric),
+                        "Static head" to "%.2f $headUnit".format(dispStat),
+                        "Total system head" to "%.2f $headUnit".format(dispTot),
+                        "Pump duty" to "%.2f $flowUnit  @  %.2f $headUnit".format(qRaw, dispTot),
+                        "Hydraulic power" to "%.2f kW  (%.2f HP)".format(powerKw, powerKw * 1.341),
+                    )
+                }.onFailure { e -> error = e.message ?: "Calculation error" }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Icon(Icons.Default.Calculate, null); Spacer(Modifier.width(8.dp)); Text("Calculate System Head") }
+
+        error?.let { ErrorCard(it) }
+        result?.let { rows ->
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Pump Sizing Results", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    HorizontalDivider()
+                    rows.forEach { (k, v) ->
+                        if (k == "---") HorizontalDivider() else HvacResultRow(k, v)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Tab 16: Cooling Coil Selection (face-area method) ─────────────────────────
+
+@Composable
+private fun CoilSelectTab() {
+    val unitSystem by AppSettings.unitSystem.collectAsState()
+    val uc    = UnitConverter
+    val isIp  = unitSystem == UnitSystem.IP
+    val tUnit = uc.tempUnit(unitSystem)
+    val aUnit = if (isIp) "ft²" else "m²"
+    val vUnit = if (isIp) "FPM" else "m/s"
+    val mUnit = if (isIp) "lb/min" else "kg/s"
+
+    var entDbt  by remember { mutableStateOf(uc.defaultTemp(27.0, unitSystem)) }
+    var entRh   by remember { mutableStateOf("55") }
+    var lvgDbt  by remember { mutableStateOf(uc.defaultTemp(13.0, unitSystem)) }
+    var lvgRh   by remember { mutableStateOf("95") }
+    var mFlow   by remember { mutableStateOf(if (isIp) "100" else "1.0") }
+    var faceArea by remember { mutableStateOf(if (isIp) "10.0" else "1.0") }
+    var result  by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var error   by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(unitSystem) {
+        entDbt = uc.defaultTemp(27.0, unitSystem); lvgDbt = uc.defaultTemp(13.0, unitSystem)
+        mFlow  = if (isIp) "100" else "1.0"; faceArea = if (isIp) "10.0" else "1.0"
+        result = null; error = null
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("Cooling Coil Selection",
+            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("Calculates coil duty, ADP, bypass factor, face velocity, and estimated row count from entering/leaving air conditions.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        HvacSectionLabel("Entering Air")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HvacField("Entering DBT ($tUnit)", entDbt, { entDbt = it }, Modifier.weight(1f))
+            HvacField("Entering RH (%)", entRh, { entRh = it }, Modifier.weight(1f))
+        }
+        HvacSectionLabel("Leaving Air")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HvacField("Leaving DBT ($tUnit)", lvgDbt, { lvgDbt = it }, Modifier.weight(1f))
+            HvacField("Leaving RH (%)", lvgRh, { lvgRh = it }, Modifier.weight(1f))
+        }
+        HvacSectionLabel("Airflow & Coil Face Area")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HvacField("Mass Flow ($mUnit)", mFlow, { mFlow = it }, Modifier.weight(1f))
+            HvacField("Face Area ($aUnit)", faceArea, { faceArea = it }, Modifier.weight(1f))
+        }
+        Text("Typical face velocity: 2.0–2.8 m/s (400–550 FPM). Above 3 m/s risks moisture carry-over.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        Button(
+            onClick = {
+                error = null; result = null
+                runCatching {
+                    val entDbtC = uc.inputTemp(entDbt.toDouble(), unitSystem)
+                    val lvgDbtC = uc.inputTemp(lvgDbt.toDouble(), unitSystem)
+                    require(lvgDbtC < entDbtC) { "Leaving DBT must be less than entering DBT." }
+                    val entRhVal = entRh.toDouble()
+                    val lvgRhVal = lvgRh.toDouble()
+                    val mKgs     = uc.inputFlow(mFlow.toDouble(), unitSystem)  // kg/s
+                    val aM2      = if (isIp) uc.ft2ToM2(faceArea.toDouble()) else faceArea.toDouble()
+                    val sEnt     = PsychroCalc.fromDbtRh(entDbtC, entRhVal)
+                    val sLvg     = PsychroCalc.fromDbtRh(lvgDbtC, lvgRhVal)
+                    val qTotal   = mKgs * (sEnt.h - sLvg.h)
+                    val qSens    = mKgs * 1.006 * (entDbtC - lvgDbtC)
+                    val qLat     = qTotal - qSens
+                    val shrCoil  = qSens / qTotal
+                    // Bypass factor from contact factor definition
+                    // BF = (Tlvg - TADP) / (Tent - TADP);  ADP is on saturation curve
+                    // Binary search for ADP
+                    var adpLo = -15.0; var adpHi = lvgDbtC - 0.01
+                    val shrSlope = 1.006 * (1.0 - shrCoil) / (2501.0 * shrCoil)
+                    repeat(60) {
+                        val mid   = (adpLo + adpHi) / 2.0
+                        val wLine = sLvg.w + shrSlope * (mid - lvgDbtC)
+                        val wSat  = PsychroCalc.humRatioFromRelHum(mid, 1.0)
+                        if (wLine > wSat) adpLo = mid else adpHi = mid
+                    }
+                    val tAdp  = (adpLo + adpHi) / 2.0
+                    val bf    = (lvgDbtC - tAdp) / (entDbtC - tAdp).coerceAtLeast(0.001)
+                    val cf    = 1.0 - bf
+                    val estRows = when {
+                        bf >= 0.45 -> 2
+                        bf >= 0.25 -> 4
+                        bf >= 0.10 -> 6
+                        bf >= 0.04 -> 8
+                        else       -> 10
+                    }
+                    val vFaceMs = mKgs * sEnt.v / aM2
+                    val vFaceDisp = if (isIp) vFaceMs * 196.85 else vFaceMs
+                    val dispQTotal = if (isIp) uc.kwToBtuh(qTotal) else qTotal * 1000
+                    val dispQSens  = if (isIp) uc.kwToBtuh(qSens)  else qSens * 1000
+                    val dispQLatent = if (isIp) uc.kwToBtuh(qLat) else qLat * 1000
+                    val dispUnit   = if (isIp) "BTU/hr" else "W"
+                    result = listOf(
+                        "Total coil duty"     to "%.0f $dispUnit  (%.2f kW  /  %.3f TR)".format(dispQTotal, qTotal, qTotal / 3.517),
+                        "Sensible heat"       to "%.0f $dispUnit".format(dispQSens),
+                        "Latent heat"         to "%.0f $dispUnit".format(dispQLatent),
+                        "Coil SHR"            to "%.3f".format(shrCoil),
+                        "---" to "",
+                        "ADP (Apparatus Dew Point)" to "%.1f %s".format(uc.displayTemp(tAdp, unitSystem), tUnit),
+                        "Bypass Factor (BF)"  to "%.3f".format(bf),
+                        "Contact Factor (CF)" to "%.3f".format(cf),
+                        "Estimated rows"      to "$estRows rows deep",
+                        "---" to "",
+                        "Face velocity"       to "%.2f $vUnit".format(vFaceDisp) +
+                            if (vFaceMs > 3.0) "  ⚠ carry-over risk" else if (vFaceMs < 1.8) "  ⚠ low — may drop moisture" else "  ✓ OK",
+                        "Face area"           to "%.2f $aUnit".format(if (isIp) uc.m2ToFt2(aM2) else aM2),
+                    )
+                }.onFailure { e -> error = e.message ?: "Calculation error" }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Icon(Icons.Default.Calculate, null); Spacer(Modifier.width(8.dp)); Text("Calculate Coil Duty") }
+
+        error?.let { ErrorCard(it) }
+        result?.let { rows ->
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Coil Selection Results", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    HorizontalDivider()
+                    rows.forEach { (k, v) ->
+                        if (k == "---") HorizontalDivider() else HvacResultRow(k, v)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Tab 17: ASHRAE 90.1 Equipment Sizing Check ────────────────────────────────
+
+@Composable
+private fun EquipCheckTab() {
+    val uc = UnitConverter
+    val systemTypes = listOf(
+        "Single-zone RTU / Split System",
+        "Multi-zone VAV AHU",
+        "Fan Coil Unit (FCU)",
+        "Chiller + AHU",
+        "VRF Outdoor Unit",
+    )
+    var sysIdx     by remember { mutableIntStateOf(0) }
+    var sysExp     by remember { mutableStateOf(false) }
+    var peakSens   by remember { mutableStateOf("50.0") }
+    var peakTotal  by remember { mutableStateOf("65.0") }
+    var instCool   by remember { mutableStateOf("80.0") }
+    var peakHeat   by remember { mutableStateOf("25.0") }
+    var instHeat   by remember { mutableStateOf("40.0") }
+    var result     by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var error      by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("ASHRAE 90.1 Equipment Sizing Check",
+            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("Checks cooling and heating oversizing ratios. ASHRAE 90.1-2022 §6.3: cooling ≤ 125% of peak, heating ≤ 140% of peak.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        HvacSectionLabel("System Type")
+        ExposedDropdownMenuBox(expanded = sysExp, onExpandedChange = { sysExp = it }) {
+            OutlinedTextField(
+                value = systemTypes[sysIdx], onValueChange = {}, readOnly = true,
+                label = { Text("System Type") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(sysExp) },
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+            )
+            ExposedDropdownMenu(expanded = sysExp, onDismissRequest = { sysExp = false }) {
+                systemTypes.forEachIndexed { i, s ->
+                    DropdownMenuItem(text = { Text(s) }, onClick = { sysIdx = i; sysExp = false })
+                }
+            }
+        }
+
+        HvacSectionLabel("Cooling")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HvacField("Peak Sensible Load (kW)", peakSens, { peakSens = it }, Modifier.weight(1f))
+            HvacField("Peak Total Load (kW)", peakTotal, { peakTotal = it }, Modifier.weight(1f))
+        }
+        HvacField("Installed Cooling Capacity (kW)", instCool, { instCool = it })
+
+        HvacSectionLabel("Heating")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HvacField("Peak Heating Load (kW)", peakHeat, { peakHeat = it }, Modifier.weight(1f))
+            HvacField("Installed Heating Capacity (kW)", instHeat, { instHeat = it }, Modifier.weight(1f))
+        }
+
+        Button(
+            onClick = {
+                error = null; result = null
+                runCatching {
+                    val qs  = peakSens.toDouble()
+                    val qt  = peakTotal.toDouble()
+                    val ic  = instCool.toDouble()
+                    val qh  = peakHeat.toDouble()
+                    val ih  = instHeat.toDouble()
+                    require(qt >= qs) { "Total load must be ≥ sensible load." }
+                    val coolRatio = ic / qt
+                    val heatRatio = ih / qh
+                    val coolLimit  = 1.25
+                    val heatLimit  = 1.40
+                    val coolOk     = coolRatio <= coolLimit
+                    val heatOk     = heatRatio <= heatLimit
+                    val coolStatus = if (coolOk) "PASS  (%.0f%% of peak)".format(coolRatio * 100)
+                                     else         "FAIL  (%.0f%% > 125%%)".format(coolRatio * 100)
+                    val heatStatus = if (heatOk) "PASS  (%.0f%% of peak)".format(heatRatio * 100)
+                                     else         "FAIL  (%.0f%% > 140%%)".format(heatRatio * 100)
+                    val maxAllowCool = qt * coolLimit
+                    val maxAllowHeat = qh * heatLimit
+                    result = listOf(
+                        "System type" to systemTypes[sysIdx],
+                        "---" to "",
+                        "Peak sensible load" to "%.1f kW  (%.2f TR)".format(qs, qs / 3.517),
+                        "Peak total cooling load" to "%.1f kW  (%.2f TR)".format(qt, qt / 3.517),
+                        "Installed cooling capacity" to "%.1f kW  (%.2f TR)".format(ic, ic / 3.517),
+                        "Cooling sizing ratio" to "%.2f×  (%.0f%%)".format(coolRatio, coolRatio * 100),
+                        "Max allowable (125%)" to "%.1f kW  (%.2f TR)".format(maxAllowCool, maxAllowCool / 3.517),
+                        "Cooling check (ASHRAE 90.1 §6.3)" to coolStatus,
+                        "---" to "",
+                        "Peak heating load" to "%.1f kW  (%.0f BTU/hr)".format(qh, uc.kwToBtuh(qh)),
+                        "Installed heating capacity" to "%.1f kW  (%.0f BTU/hr)".format(ih, uc.kwToBtuh(ih)),
+                        "Heating sizing ratio" to "%.2f×  (%.0f%%)".format(heatRatio, heatRatio * 100),
+                        "Max allowable (140%)" to "%.1f kW".format(maxAllowHeat),
+                        "Heating check (ASHRAE 90.1 §6.3)" to heatStatus,
+                    )
+                }.onFailure { e -> error = e.message ?: "Calculation error" }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Icon(Icons.Default.Calculate, null); Spacer(Modifier.width(8.dp)); Text("Check Equipment Sizing") }
+
+        error?.let { ErrorCard(it) }
+        result?.let { rows ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("ASHRAE 90.1 Sizing Check", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    HorizontalDivider()
+                    rows.forEach { (k, v) ->
+                        if (k == "---") { HorizontalDivider() } else {
+                            val isPass = v.startsWith("PASS")
+                            val isFail = v.startsWith("FAIL")
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(k,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                                    modifier = Modifier.weight(1f))
+                                Text(v,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = when {
+                                        isPass -> androidx.compose.ui.graphics.Color(0xFF2E7D32)
+                                        isFail -> MaterialTheme.colorScheme.error
+                                        else   -> MaterialTheme.colorScheme.onPrimaryContainer
+                                    })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text("ASHRAE 90.1-2022 §6.3 Reference",
+                    style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(4.dp))
+                Text("Cooling: Installed capacity ≤ 125% of the peak block cooling load.\nHeating: Installed capacity ≤ 140% of the peak block heating load.\nExemptions apply to heat pumps in heating mode, electric resistance when primary, and certain climate zones.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+// ── Tab 18: Cooling Tower Makeup Water ────────────────────────────────────────
+
+@Composable
+private fun CtWaterTab() {
+    val unitSystem by AppSettings.unitSystem.collectAsState()
+    val isIp = unitSystem == UnitSystem.IP
+    val flowUnit = if (isIp) "GPM" else "L/s"
+    val tempUnit = if (isIp) "°F"  else "°C"
+
+    var flowText by remember { mutableStateOf(if (isIp) "200" else "12") }
+    var rangeText by remember { mutableStateOf(if (isIp) "10" else "5.5") }
+    var cocText   by remember { mutableStateOf("4.0") }
+    var result    by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var error     by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(unitSystem) {
+        flowText  = if (isIp) "200" else "12"
+        rangeText = if (isIp) "10" else "5.5"
+        result = null; error = null
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("Cooling Tower Makeup Water",
+            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("Calculates evaporation loss, blowdown, drift, and total makeup water flow from circulation rate, temperature range, and cycles of concentration.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        HvacSectionLabel("Tower Conditions")
+        HvacField("Condenser Water Circulation Flow ($flowUnit)", flowText, { flowText = it })
+        HvacField("Tower Range (Δ$tempUnit) — entering minus leaving water temp", rangeText, { rangeText = it })
+        HvacField("Cycles of Concentration (COC)", cocText, { cocText = it })
+        Text("COC = TDS in circulating water / TDS in makeup water. Typical design: 3–6 for quality water supply. Below 3 wastes water; above 6 risks scale.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        Button(
+            onClick = {
+                error = null; result = null
+                runCatching {
+                    val qRaw   = flowText.toDouble()
+                    val rngRaw = rangeText.toDouble()
+                    val coc    = cocText.toDouble()
+                    require(coc > 1.0) { "COC must be > 1.0." }
+                    // Convert to SI: L/s and °C
+                    val qLs    = if (isIp) qRaw * 0.0630902 else qRaw
+                    val rngC   = if (isIp) rngRaw * 5.0 / 9.0 else rngRaw
+                    // Evaporation: energy balance  E × L_evap = ρ × Q × Cp × ΔT
+                    // E (L/s) = Q(L/s) × 4.186 × ΔT / 2430
+                    val evapLs = qLs * 4.186 * rngC / 2430.0
+                    val evapPct = evapLs / qLs * 100.0
+                    val driftLs = qLs * 0.0002   // 0.02% of circulation (drift eliminator)
+                    val blowdownLs = evapLs / (coc - 1.0) - driftLs
+                    val makeupLs   = evapLs + blowdownLs.coerceAtLeast(0.0) + driftLs
+
+                    fun dispQ(ls: Double) = if (isIp) "%.2f GPM".format(ls / 0.0630902) else "%.3f L/s".format(ls)
+
+                    result = listOf(
+                        "Circulation flow" to dispQ(qLs),
+                        "Tower range" to "%.1f %s".format(rngRaw, tempUnit),
+                        "COC" to "%.1f".format(coc),
+                        "---" to "",
+                        "Evaporation loss" to "${dispQ(evapLs)}  (%.2f%% of flow)".format(evapPct),
+                        "Drift loss" to "${dispQ(driftLs)}  (0.02% — modern eliminators)",
+                        "Blowdown required" to dispQ(blowdownLs.coerceAtLeast(0.0)),
+                        "Total makeup water" to dispQ(makeupLs),
+                        "---" to "",
+                        "Annual makeup (m³/yr)" to "%.0f m³/yr".format(makeupLs * 3.6 * 8760),
+                        "Tip: raise COC by 1" to "saves ≈ %.0f m³/yr".format(
+                            (evapLs / (coc - 1.0) - evapLs / coc) * 3.6 * 8760),
+                    )
+                }.onFailure { e -> error = e.message ?: "Calculation error" }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Icon(Icons.Default.Calculate, null); Spacer(Modifier.width(8.dp)); Text("Calculate Makeup Water") }
+
+        error?.let { ErrorCard(it) }
+        result?.let { rows ->
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Cooling Tower Water Balance", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    HorizontalDivider()
+                    rows.forEach { (k, v) ->
+                        if (k == "---") HorizontalDivider() else HvacResultRow(k, v)
+                    }
+                }
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("Water Treatment Guide",
+                    style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+                Text("COC 2–3: marginal efficiency, high water waste.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("COC 4–6: good balance of water savings vs scale risk for typical water quality.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("COC > 6: maximum savings but requires chemical treatment and monitoring.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Drift eliminators should achieve < 0.002% drift. Replace if > 0.05%.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
 }
