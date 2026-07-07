@@ -11,7 +11,7 @@
         android:strokeWidth="5.5"
         android:fillColor="#00000000"
         android:strokeLineCap="round"
-        android:pathData="M 12,30 Q 26,20 43,30 Q 60,40 74,30"/>
+        android:pathData="M 14,30 Q 27,21 41,30 Q 54,39 68,30"/>
 
     <!-- Airflow wave 2 (middle) -->
     <path
@@ -19,7 +19,7 @@
         android:strokeWidth="5.5"
         android:fillColor="#00000000"
         android:strokeLineCap="round"
-        android:pathData="M 12,54 Q 26,44 43,54 Q 60,64 74,54"/>
+        android:pathData="M 14,54 Q 27,45 41,54 Q 54,63 68,54"/>
 
     <!-- Airflow wave 3 (bottom) -->
     <path
@@ -27,27 +27,27 @@
         android:strokeWidth="5.5"
         android:fillColor="#00000000"
         android:strokeLineCap="round"
-        android:pathData="M 12,78 Q 26,68 43,78 Q 60,88 74,78"/>
+        android:pathData="M 14,78 Q 27,69 41,78 Q 54,87 68,78"/>
 
     <!-- Thermometer shaft: white rounded-top flat-bottom capsule -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M 84,23 a3,3,0,0,1,6,0 L 90,75 L 84,75 Z"/>
+        android:pathData="M 78,24 a2.5,2.5,0,0,1,5,0 L 86,74 L 78,74 Z"/>
 
     <!-- Thermometer bulb: white circle -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M 87,83 m-8,0 a8,8,0,1,0,16,0 a8,8,0,1,0,-16,0"/>
+        android:pathData="M 81.5,82 m-7,0 a7,7,0,1,0,14,0 a7,7,0,1,0,-14,0"/>
 
     <!-- Mercury in shaft: amber fill -->
     <path
         android:fillColor="#FFB300"
-        android:pathData="M 85.5,47 L 88.5,47 L 88.5,75 L 85.5,75 Z"/>
+        android:pathData="M 79.5,48 L 83.5,48 L 83.5,74 L 79.5,74 Z"/>
 
     <!-- Mercury in bulb: amber fill -->
     <path
         android:fillColor="#FFB300"
-        android:pathData="M 87,83 m-5.5,0 a5.5,5.5,0,1,0,11,0 a5.5,5.5,0,1,0,-11,0"/>
+        android:pathData="M 81.5,82 m-5,0 a5,5,0,1,0,10,0 a5,5,0,1,0,-10,0"/>
 
     <!-- Tick marks on thermometer shaft -->
     <path
@@ -55,6 +55,6 @@
         android:strokeWidth="1.5"
         android:fillColor="#00000000"
         android:strokeLineCap="round"
-        android:pathData="M 91,35 L 95,35 M 91,50 L 95,50 M 91,65 L 95,65"/>
+        android:pathData="M 87,35 L 90,35 M 87,50 L 90,50 M 87,65 L 90,65"/>
 
 </vector>

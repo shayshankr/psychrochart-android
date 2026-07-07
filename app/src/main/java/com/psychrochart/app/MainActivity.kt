@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.DeviceHub
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Thermostat
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
@@ -76,7 +78,9 @@ class MainActivity : ComponentActivity() {
                 // Load saved preferences on startup
                 LaunchedEffect(Unit) {
                     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    AppSettings.setDarkMode(prefs.getBoolean(KEY_DARK_MODE, true))
+                    val defaultDarkMode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                        context.resources.configuration.isNightModeActive
+                    AppSettings.setDarkMode(prefs.getBoolean(KEY_DARK_MODE, defaultDarkMode))
                     if (!prefs.getBoolean(KEY_ONBOARDED, false)) {
                         showOnboarding = true
                         prefs.edit().putBoolean(KEY_ONBOARDED, true).apply()
@@ -95,6 +99,12 @@ class MainActivity : ComponentActivity() {
                         TopAppBar(
                             title = { Text("HVAC Suite", fontWeight = FontWeight.Bold) },
                             actions = {
+                                IconButton(onClick = { AppSettings.setDarkMode(!darkMode) }) {
+                                    Icon(
+                                        if (darkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                        contentDescription = if (darkMode) "Switch to light mode" else "Switch to dark mode"
+                                    )
+                                }
                                 IconButton(onClick = { showSettings = true }) {
                                     Icon(Icons.Default.Settings, contentDescription = "Settings")
                                 }
