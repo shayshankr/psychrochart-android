@@ -1,60 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-
-    <!-- Airflow wave 1 (top) -->
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="5.5"
-        android:fillColor="#00000000"
-        android:strokeLineCap="round"
-        android:pathData="M 14,30 Q 27,21 41,30 Q 54,39 68,30"/>
-
-    <!-- Airflow wave 2 (middle) -->
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="5.5"
-        android:fillColor="#00000000"
-        android:strokeLineCap="round"
-        android:pathData="M 14,54 Q 27,45 41,54 Q 54,63 68,54"/>
-
-    <!-- Airflow wave 3 (bottom) -->
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="5.5"
-        android:fillColor="#00000000"
-        android:strokeLineCap="round"
-        android:pathData="M 14,78 Q 27,69 41,78 Q 54,87 68,78"/>
-
-    <!-- Thermometer shaft: white rounded-top flat-bottom capsule -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M 78,24 a2.5,2.5,0,0,1,5,0 L 86,74 L 78,74 Z"/>
-
-    <!-- Thermometer bulb: white circle -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M 81.5,82 m-7,0 a7,7,0,1,0,14,0 a7,7,0,1,0,-14,0"/>
-
-    <!-- Mercury in shaft: amber fill -->
-    <path
-        android:fillColor="#FFB300"
-        android:pathData="M 79.5,48 L 83.5,48 L 83.5,74 L 79.5,74 Z"/>
-
-    <!-- Mercury in bulb: amber fill -->
-    <path
-        android:fillColor="#FFB300"
-        android:pathData="M 81.5,82 m-5,0 a5,5,0,1,0,10,0 a5,5,0,1,0,-10,0"/>
-
-    <!-- Tick marks on thermometer shaft -->
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.5"
-        android:fillColor="#00000000"
-        android:strokeLineCap="round"
-        android:pathData="M 87,35 L 90,35 M 87,50 L 90,50 M 87,65 L 90,65"/>
-
-</vector>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Psychrometric Chart Logo -->
+    <item
+        android:gravity="center"
+        android:width="108dp"
+        android:height="108dp">
+        <bitmap
+            android:src="@drawable/logo_psychrochart"
+            android:gravity="center" />
+    </item>
+</layer-list>
