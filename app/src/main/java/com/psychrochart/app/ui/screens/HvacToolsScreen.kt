@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+﻿@file:OptIn(ExperimentalMaterial3Api::class)
 
 package com.psychrochart.app.ui.screens
 
@@ -8,6 +8,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.log10
 import kotlin.math.pow
@@ -2630,17 +2631,17 @@ private fun ErvHrvTab() {
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         HvacSectionLabel("Outdoor Air Conditions")
-        HvacField("OA Dry-Bulb (${if (unitSystem == UnitSystem.IP) "°F" else "°C"})", tOa) { tOa = it }
-        HvacField("OA Relative Humidity (%)", rhOa) { rhOa = it }
+        HvacField("OA Dry-Bulb (${if (unitSystem == UnitSystem.IP) "°F" else "°C"})", tOa, { tOa = it })
+        HvacField("OA Relative Humidity (%)", rhOa, { rhOa = it })
 
         HvacSectionLabel("Exhaust Air Conditions")
-        HvacField("Exhaust Dry-Bulb (${if (unitSystem == UnitSystem.IP) "°F" else "°C"})", tExh) { tExh = it }
-        HvacField("Exhaust Relative Humidity (%)", rhExh) { rhExh = it }
+        HvacField("Exhaust Dry-Bulb (${if (unitSystem == UnitSystem.IP) "°F" else "°C"})", tExh, { tExh = it })
+        HvacField("Exhaust Relative Humidity (%)", rhExh, { rhExh = it })
 
         HvacSectionLabel("ERV/HRV Parameters")
-        HvacField("Sensible Effectiveness (%)", effS) { effS = it }
-        HvacField("Latent Effectiveness (%)", effL) { effL = it }
-        HvacField("Airflow (${if (unitSystem == UnitSystem.IP) "cfm" else "L/s"})", flow) { flow = it }
+        HvacField("Sensible Effectiveness (%)", effS, { effS = it })
+        HvacField("Latent Effectiveness (%)", effL, { effL = it })
+        HvacField("Airflow (${if (unitSystem == UnitSystem.IP) "cfm" else "L/s"})", flow, { flow = it })
 
         Button(
             onClick = {
@@ -2783,11 +2784,11 @@ private fun RefrigCycleTab() {
         }
 
         HvacSectionLabel("Cycle Operating Points")
-        HvacField("Evaporating Temperature (°C)", tEvap) { tEvap = it }
-        HvacField("Condensing Temperature (°C)", tCond) { tCond = it }
-        HvacField("Superheat (K)", shK) { shK = it }
-        HvacField("Subcooling (K)", scK) { scK = it }
-        HvacField("Compressor Isentropic Efficiency (%)", etaIs) { etaIs = it }
+        HvacField("Evaporating Temperature (°C)", tEvap, { tEvap = it })
+        HvacField("Condensing Temperature (°C)", tCond, { tCond = it })
+        HvacField("Superheat (K)", shK, { shK = it })
+        HvacField("Subcooling (K)", scK, { scK = it })
+        HvacField("Compressor Isentropic Efficiency (%)", etaIs, { etaIs = it })
 
         Button(
             onClick = {
@@ -2883,8 +2884,8 @@ private fun Co2DcvTab() {
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         HvacSectionLabel("Space Parameters")
-        HvacField("Room Volume (m³)", volume) { volume = it }
-        HvacField("Number of Occupants", occupants) { occupants = it }
+        HvacField("Room Volume (m³)", volume, { volume = it })
+        HvacField("Number of Occupants", occupants, { occupants = it })
 
         HvacSectionLabel("Activity Level")
         ExposedDropdownMenuBox(expanded = actExpanded, onExpandedChange = { actExpanded = it }) {
@@ -2911,11 +2912,11 @@ private fun Co2DcvTab() {
                 }
             }
         }
-        HvacField("CO₂ Generation Rate (L/s·person)", genRate) { genRate = it }
+        HvacField("CO₂ Generation Rate (L/s·person)", genRate, { genRate = it })
 
         HvacSectionLabel("Ventilation")
-        HvacField("OA Ventilation Flow (L/s)", ventFlow) { ventFlow = it }
-        HvacField("Outdoor CO₂ (ppm)", cOutdoor) { cOutdoor = it }
+        HvacField("OA Ventilation Flow (L/s)", ventFlow, { ventFlow = it })
+        HvacField("Outdoor CO₂ (ppm)", cOutdoor, { cOutdoor = it })
 
         Button(
             onClick = {
@@ -3059,12 +3060,12 @@ private fun DiffuserThrowTab() {
             }
         }
         if (typeIdx == diffuserTypes.size - 1) {
-            HvacField("Throw Constant K", customK) { customK = it }
+            HvacField("Throw Constant K", customK, { customK = it })
         }
 
         HvacSectionLabel("Flow & Geometry")
-        HvacField("Flow Rate (${if (unitSystem == UnitSystem.IP) "cfm" else "L/s"})", flowStr) { flowStr = it }
-        HvacField("Neck Area (${if (unitSystem == UnitSystem.IP) "ft²" else "m²"})", neckArea) { neckArea = it }
+        HvacField("Flow Rate (${if (unitSystem == UnitSystem.IP) "cfm" else "L/s"})", flowStr, { flowStr = it })
+        HvacField("Neck Area (${if (unitSystem == UnitSystem.IP) "ft²" else "m²"})", neckArea, { neckArea = it })
 
         Button(
             onClick = {
@@ -3165,7 +3166,7 @@ private fun ChillerIplvTab() {
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         HvacSectionLabel("Chiller Rated Capacity")
-        HvacField("Rated Cooling Capacity (tons of refrigeration)", capTons) { capTons = it }
+        HvacField("Rated Cooling Capacity (tons of refrigeration)", capTons, { capTons = it })
 
         HvacSectionLabel("COP at AHRI 550/590 Load Points")
 
@@ -3181,10 +3182,10 @@ private fun ChillerIplvTab() {
             }
         }
 
-        HvacField("COP at 100% load (Point A)", copA) { copA = it }
-        HvacField("COP at 75% load (Point B)", copB) { copB = it }
-        HvacField("COP at 50% load (Point C)", copC) { copC = it }
-        HvacField("COP at 25% load (Point D)", copD) { copD = it }
+        HvacField("COP at 100% load (Point A)", copA, { copA = it })
+        HvacField("COP at 75% load (Point B)", copB, { copB = it })
+        HvacField("COP at 50% load (Point C)", copC, { copC = it })
+        HvacField("COP at 25% load (Point D)", copD, { copD = it })
 
         Button(
             onClick = {
