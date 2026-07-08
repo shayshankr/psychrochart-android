@@ -60,6 +60,7 @@ fun HvacToolsScreen(vm: MainViewModel) {
         "Room Load", "VRF", "Refrigerant",
         "PMV/Comfort", "VAV/Reheat", "Zone Summary",
         "Pump Sizing", "Coil Select", "Equip. Check", "CT Water",
+        "ERV / HRV", "Refrig. Cycle", "CO₂ / DCV", "Diffuser", "Chiller IPLV",
     )
     var selectedTab by remember { mutableIntStateOf(0) }
 
@@ -93,6 +94,11 @@ fun HvacToolsScreen(vm: MainViewModel) {
                15 -> CoilSelectTab()
                16 -> EquipCheckTab()
                17 -> CtWaterTab()
+               18 -> ErvHrvTab()
+               19 -> RefrigCycleTab()
+               20 -> Co2DcvTab()
+               21 -> DiffuserThrowTab()
+               22 -> ChillerIplvTab()
             }
         }
     }
@@ -2589,6 +2595,678 @@ private fun CtWaterTab() {
                 Text("Drift eliminators should achieve < 0.002% drift. Replace if > 0.05%.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+// ── Tab 18: ERV / HRV Heat Recovery ───────────────────────────────────────────
+
+@Composable
+private fun ErvHrvTab() {
+    val unitSystem by AppSettings.unitSystem.collectAsState()
+    val uc = UnitConverter
+
+    var tOa   by remember { mutableStateOf(if (unitSystem == UnitSystem.IP) "95" else "35") }
+    var rhOa  by remember { mutableStateOf("40") }
+    var tExh  by remember { mutableStateOf(if (unitSystem == UnitSystem.IP) "75" else "24") }
+    var rhExh by remember { mutableStateOf("50") }
+    var effS  by remember { mutableStateOf("75") }
+    var effL  by remember { mutableStateOf("60") }
+    var flow  by remember { mutableStateOf("1000") }
+    var result by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var error  by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(unitSystem) {
+        tOa  = if (unitSystem == UnitSystem.IP) "95" else "35"
+        tExh = if (unitSystem == UnitSystem.IP) "75" else "24"
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        HvacSectionLabel("Outdoor Air Conditions")
+        HvacField("OA Dry-Bulb (${if (unitSystem == UnitSystem.IP) "°F" else "°C"})", tOa) { tOa = it }
+        HvacField("OA Relative Humidity (%)", rhOa) { rhOa = it }
+
+        HvacSectionLabel("Exhaust Air Conditions")
+        HvacField("Exhaust Dry-Bulb (${if (unitSystem == UnitSystem.IP) "°F" else "°C"})", tExh) { tExh = it }
+        HvacField("Exhaust Relative Humidity (%)", rhExh) { rhExh = it }
+
+        HvacSectionLabel("ERV/HRV Parameters")
+        HvacField("Sensible Effectiveness (%)", effS) { effS = it }
+        HvacField("Latent Effectiveness (%)", effL) { effL = it }
+        HvacField("Airflow (${if (unitSystem == UnitSystem.IP) "cfm" else "L/s"})", flow) { flow = it }
+
+        Button(
+            onClick = {
+                error = null; result = null
+                runCatching {
+                    val es   = effS.toDouble() / 100.0
+                    val el   = effL.toDouble() / 100.0
+                    val qLs  = if (unitSystem == UnitSystem.IP) flow.toDouble() * 0.4719 else flow.toDouble()
+                    val toaC = if (unitSystem == UnitSystem.IP) (tOa.toDouble() - 32) / 1.8 else tOa.toDouble()
+                    val texC = if (unitSystem == UnitSystem.IP) (tExh.toDouble() - 32) / 1.8 else tExh.toDouble()
+                    val rhOaD = rhOa.toDouble() / 100.0
+                    val rhExhD = rhExh.toDouble() / 100.0
+
+                    // Antoine vapour pressure → humidity ratio
+                    fun pSat(tC: Double) = 0.6108 * exp(17.27 * tC / (tC + 237.3))
+                    fun wFromRhT(rh: Double, tC: Double): Double {
+                        val ps = pSat(tC)
+                        return 0.622 * rh * ps / (101.325 - rh * ps)
+                    }
+
+                    val wOa  = wFromRhT(rhOaD, toaC)
+                    val wExh = wFromRhT(rhExhD, texC)
+
+                    // Post-ERV supply conditions
+                    val tSupC = toaC + es * (texC - toaC)
+                    val wSup  = wOa + el * (wExh - wOa)
+                    val tSupDisp = if (unitSystem == UnitSystem.IP) tSupC * 1.8 + 32 else tSupC
+                    val tUnit = if (unitSystem == UnitSystem.IP) "°F" else "°C"
+
+                    // Psychro properties (simplified)
+                    val rhaSup = run {
+                        val ps = pSat(tSupC)
+                        (wSup * 101.325 / ((0.622 + wSup) * ps) * 100).coerceIn(0.0, 100.0)
+                    }
+
+                    // Energy recovered (kW)
+                    val rhoAir = 1.2   // kg/m³
+                    val cpAir  = 1.006 // kJ/kg·K
+                    val hVapW  = 2501.0
+                    val mDot   = rhoAir * qLs / 1000.0  // kg/s
+                    val qSens  = mDot * cpAir * (texC - toaC) * es
+                    val qLat   = mDot * hVapW * (wExh - wOa) * el
+                    val qTotal = qSens + qLat
+
+                    result = listOf(
+                        "--- OA → ERV → Supply" to "",
+                        "OA Dry-Bulb" to "%.1f %s".format(if (unitSystem == UnitSystem.IP) tOa.toDouble() else toaC, tUnit),
+                        "OA Humidity Ratio" to "%.4f kg/kg".format(wOa),
+                        "Supply Dry-Bulb" to "%.1f %s".format(tSupDisp, tUnit),
+                        "Supply Humidity Ratio" to "%.4f kg/kg".format(wSup),
+                        "Supply RH (est.)" to "%.1f %%".format(rhaSup),
+                        "---" to "",
+                        "--- Energy Recovered" to "",
+                        "Sensible Recovery" to "%.2f kW".format(qSens),
+                        "Latent Recovery" to "%.2f kW".format(qLat),
+                        "Total Recovery" to "%.2f kW".format(qTotal),
+                        "---" to "",
+                        "Cooling Load Reduction" to "%.2f kW  (%.0f%% of sensible load)".format(
+                            qSens, if (qTotal > 0) qSens / qTotal * 100 else 0.0),
+                    )
+                }.onFailure { e -> error = e.message ?: "Calculation error" }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Icon(Icons.Default.Calculate, null); Spacer(Modifier.width(8.dp)); Text("Calculate ERV Recovery") }
+
+        error?.let { ErrorCard(it) }
+        result?.let { rows ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("ERV / HRV Results", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    HorizontalDivider()
+                    rows.forEach { (k, v) -> if (k == "---") HorizontalDivider() else HvacResultRow(k, v) }
+                }
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("ERV vs HRV", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+                Text("ERV (Energy Recovery Ventilator): transfers both heat AND moisture — ideal for humid climates.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("HRV (Heat Recovery Ventilator): transfers heat only — set latent eff. to 0 to model HRV.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Typical sensible eff. 70–85%; latent eff. 50–70%. ASHRAE 90.1 requires ≥ 50% at design.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+// ── Tab 19: Refrigeration Cycle Analyser ──────────────────────────────────────
+
+@Composable
+private fun RefrigCycleTab() {
+    val refrigerants = RefrigData.refrigerants
+    var selectedIdx by remember { mutableIntStateOf(2) } // R-410A default
+    var expanded    by remember { mutableStateOf(false) }
+    var tEvap  by remember { mutableStateOf("5") }
+    var tCond  by remember { mutableStateOf("40") }
+    var shK    by remember { mutableStateOf("5") }
+    var scK    by remember { mutableStateOf("5") }
+    var etaIs  by remember { mutableStateOf("75") }
+    var result by remember { mutableStateOf<RefrigData.CycleResult?>(null) }
+    var error  by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        HvacSectionLabel("Refrigerant Selection")
+        ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+            OutlinedTextField(
+                value = refrigerants[selectedIdx].let { "${it.name}  (GWP ${it.gwp}, ${it.safetyClass})" },
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Refrigerant") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+            )
+            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                refrigerants.forEachIndexed { i, r ->
+                    DropdownMenuItem(
+                        text = { Text("${r.name}  GWP ${r.gwp}  ${r.safetyClass}  — ${r.notes}") },
+                        onClick = { selectedIdx = i; expanded = false }
+                    )
+                }
+            }
+        }
+
+        HvacSectionLabel("Cycle Operating Points")
+        HvacField("Evaporating Temperature (°C)", tEvap) { tEvap = it }
+        HvacField("Condensing Temperature (°C)", tCond) { tCond = it }
+        HvacField("Superheat (K)", shK) { shK = it }
+        HvacField("Subcooling (K)", scK) { scK = it }
+        HvacField("Compressor Isentropic Efficiency (%)", etaIs) { etaIs = it }
+
+        Button(
+            onClick = {
+                error = null; result = null
+                runCatching {
+                    val r = refrigerants[selectedIdx]
+                    val te = tEvap.toDouble()
+                    val tc = tCond.toDouble()
+                    require(te < tc) { "Evaporating temp must be below condensing temp" }
+                    require(etaIs.toDouble() in 30.0..100.0) { "Isentropic efficiency must be 30–100%" }
+                    result = RefrigData.calculateCycle(
+                        r, te, tc, shK.toDouble(), scK.toDouble(), etaIs.toDouble() / 100.0
+                    )
+                }.onFailure { e -> error = e.message ?: "Calculation error" }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Icon(Icons.Default.Calculate, null); Spacer(Modifier.width(8.dp)); Text("Analyse Cycle") }
+
+        error?.let { ErrorCard(it) }
+        result?.let { c ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Refrigeration Cycle Results — ${refrigerants[selectedIdx].name}",
+                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    HorizontalDivider()
+                    HvacResultRow("Evap. Pressure",   "%.1f kPa  (%.2f bar)".format(c.pEvapKpa, c.pEvapKpa / 100.0))
+                    HvacResultRow("Cond. Pressure",   "%.1f kPa  (%.2f bar)".format(c.pCondKpa, c.pCondKpa / 100.0))
+                    HvacResultRow("Pressure Ratio",   "%.2f".format(c.pressureRatio))
+                    HorizontalDivider()
+                    HvacResultRow("h₁ (suction)",     "%.1f kJ/kg".format(c.h1))
+                    HvacResultRow("h₂ (discharge)",   "%.1f kJ/kg".format(c.h2))
+                    HvacResultRow("h₃ (cond. out)",   "%.1f kJ/kg".format(c.h3))
+                    HvacResultRow("h₄ (evap. in)",    "%.1f kJ/kg".format(c.h4))
+                    HvacResultRow("Discharge Temp",   "%.1f °C".format(c.tDischC))
+                    HorizontalDivider()
+                    HvacResultRow("COP (Cooling)",    "%.2f".format(c.copCooling))
+                    HvacResultRow("COP (Heating)",    "%.2f".format(c.copHeating))
+                    HvacResultRow("EER",              "%.2f Btu/W·h".format(c.eerBtuWh))
+                    HvacResultRow("kW/TR",            "%.3f".format(c.kwPerTr))
+                    HvacResultRow("Mass Flow",        "%.4f kg/s per kW cooling".format(c.massFlowPerKwKgs))
+                }
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("Cycle Notes", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+                Text("Pressures calculated via Clausius-Clapeyron (±3% vs REFPROP). Enthalpies use IIR reference (hf=200 kJ/kg at 0°C).",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("A2L refrigerants (R-32, R-454B) require certified leak-safe equipment designs.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("A3 (R-290 Propane) limited to small charge systems per IEC 60335-2-89.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+// ── Tab 20: CO₂ / Demand-Controlled Ventilation ───────────────────────────────
+
+@Composable
+private fun Co2DcvTab() {
+    var volume    by remember { mutableStateOf("500") }
+    var occupants by remember { mutableStateOf("20") }
+    var genRate   by remember { mutableStateOf("0.0052") } // CO2 L/s per person (light office)
+    var ventFlow  by remember { mutableStateOf("200") }    // L/s OA
+    var cOutdoor  by remember { mutableStateOf("420") }    // ppm
+    var result    by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var error     by remember { mutableStateOf<String?>(null) }
+
+    // Activity presets: (label, gen rate L/s·person)
+    val activities = listOf(
+        "Seated/Office (0.0052 L/s)" to 0.0052,
+        "Light Activity (0.0079 L/s)" to 0.0079,
+        "Moderate Activity (0.012 L/s)" to 0.012,
+        "Heavy Exercise (0.020 L/s)" to 0.020,
+    )
+    var actExpanded by remember { mutableStateOf(false) }
+    var actIdx      by remember { mutableIntStateOf(0) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        HvacSectionLabel("Space Parameters")
+        HvacField("Room Volume (m³)", volume) { volume = it }
+        HvacField("Number of Occupants", occupants) { occupants = it }
+
+        HvacSectionLabel("Activity Level")
+        ExposedDropdownMenuBox(expanded = actExpanded, onExpandedChange = { actExpanded = it }) {
+            OutlinedTextField(
+                value = activities[actIdx].first,
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Activity") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(actExpanded) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+            )
+            ExposedDropdownMenu(expanded = actExpanded, onDismissRequest = { actExpanded = false }) {
+                activities.forEachIndexed { i, (label, rate) ->
+                    DropdownMenuItem(
+                        text = { Text(label) },
+                        onClick = {
+                            actIdx = i
+                            genRate = rate.toString()
+                            actExpanded = false
+                        }
+                    )
+                }
+            }
+        }
+        HvacField("CO₂ Generation Rate (L/s·person)", genRate) { genRate = it }
+
+        HvacSectionLabel("Ventilation")
+        HvacField("OA Ventilation Flow (L/s)", ventFlow) { ventFlow = it }
+        HvacField("Outdoor CO₂ (ppm)", cOutdoor) { cOutdoor = it }
+
+        Button(
+            onClick = {
+                error = null; result = null
+                runCatching {
+                    val V    = volume.toDouble()
+                    val N    = occupants.toDouble()
+                    val G    = genRate.toDouble()   // L/s per person
+                    val Q    = ventFlow.toDouble() / 1000.0  // m³/s
+                    val cOut = cOutdoor.toDouble()
+
+                    require(Q > 0) { "Ventilation flow must be > 0" }
+                    require(V > 0) { "Volume must be > 0" }
+
+                    // Steady-state: C_ss = C_out + N·G/Q  (×1000 L→m³)
+                    val totalGenMs = N * G / 1000.0  // m³/s CO₂
+                    val css = cOut + totalGenMs / Q * 1e6  // ppm
+
+                    // Time constant (63% of steady state)
+                    val tau = V / Q  // seconds
+
+                    // Flow to achieve 1000 ppm setpoint (ASHRAE 62.1 typical)
+                    val q1000 = if (css > 1000) totalGenMs / ((1000 - cOut) / 1e6) else 0.0
+                    // Flow for 800 ppm (typical DCV target)
+                    val q800 = totalGenMs / ((800 - cOut) / 1e6)
+                    // Flow for 600 ppm (outdoor level + 180 ppm above-outdoor limit)
+                    val q600 = totalGenMs / ((600 - cOut) / 1e6).coerceAtLeast(1e-9)
+
+                    // CO2 per person rate converted for display
+                    val oaPerPerson = Q / N * 1000.0  // L/s per person
+
+                    result = listOf(
+                        "--- Steady-State Analysis" to "",
+                        "Steady-State CO₂" to "%.0f ppm".format(css),
+                        "Time Constant (τ)" to "%.1f min  (%.0f s)".format(tau / 60.0, tau),
+                        "OA per Person" to "%.1f L/s·person".format(oaPerPerson),
+                        "---" to "",
+                        "--- OA Flow for CO₂ Setpoints" to "",
+                        "Flow for 1000 ppm" to if (css <= 1000) "Current flow sufficient" else "%.0f L/s  (%.1f ACH)".format(q1000 * 1000, q1000 * 3600 / V),
+                        "Flow for 800 ppm" to if (q800 < 0) "Not achievable with outdoor air" else "%.0f L/s  (%.1f ACH)".format(q800 * 1000, q800 * 3600 / V),
+                        "---" to "",
+                        "--- Status" to "",
+                        "ASHRAE 62.1 Status" to when {
+                            css <= 700 -> "Excellent (< 700 ppm)"
+                            css <= 1000 -> "Good (700–1000 ppm)"
+                            css <= 1400 -> "Marginal (1000–1400 ppm)"
+                            else -> "Poor (> 1400 ppm) — increase OA"
+                        },
+                    )
+                }.onFailure { e -> error = e.message ?: "Calculation error" }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Icon(Icons.Default.Calculate, null); Spacer(Modifier.width(8.dp)); Text("Calculate CO₂ Levels") }
+
+        error?.let { ErrorCard(it) }
+        result?.let { rows ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("CO₂ / DCV Analysis", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    HorizontalDivider()
+                    rows.forEach { (k, v) -> if (k == "---") HorizontalDivider() else HvacResultRow(k, v) }
+                }
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("DCV Guidance", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+                Text("Typical outdoor CO₂ is 400–450 ppm. ASHRAE 62.1 DCV allows OA reduction when occupancy drops.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("CO₂ above 1000 ppm correlates with reduced cognitive performance (Lawrence Berkeley studies).",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("DCV sensors should be calibrated annually; place at breathing zone height (1.1–1.7 m).",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+// ── Tab 21: Diffuser Throw Calculator ─────────────────────────────────────────
+
+@Composable
+private fun DiffuserThrowTab() {
+    val unitSystem by AppSettings.unitSystem.collectAsState()
+
+    // Diffuser types with K factors (throw constant)
+    val diffuserTypes = listOf(
+        Triple("Square 4-Way (K ≈ 1.4)",    1.4, "Ceiling, open plan"),
+        Triple("Round Ceiling (K ≈ 1.1)",   1.1, "Residential/small office"),
+        Triple("Linear Slot 2-way (K ≈ 4.0)", 4.0, "Perimeter heating/cooling"),
+        Triple("Linear Slot 1-way (K ≈ 5.0)", 5.0, "Perimeter, one-wall throw"),
+        Triple("High-Induction (K ≈ 6.0)",  6.0, "Large open areas"),
+        Triple("Custom K factor",           0.0, "Enter K below"),
+    )
+    var typeIdx  by remember { mutableIntStateOf(0) }
+    var typeExp  by remember { mutableStateOf(false) }
+    var customK  by remember { mutableStateOf("1.4") }
+    var flowStr  by remember { mutableStateOf(if (unitSystem == UnitSystem.IP) "200" else "100") }
+    var neckArea by remember { mutableStateOf("0.04") }  // m² or ft²
+    var result   by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var error    by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(unitSystem) {
+        flowStr  = if (unitSystem == UnitSystem.IP) "200" else "100"
+        neckArea = if (unitSystem == UnitSystem.IP) "0.43" else "0.04"
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        HvacSectionLabel("Diffuser Type")
+        ExposedDropdownMenuBox(expanded = typeExp, onExpandedChange = { typeExp = it }) {
+            OutlinedTextField(
+                value = diffuserTypes[typeIdx].first,
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Diffuser Type") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(typeExp) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+            )
+            ExposedDropdownMenu(expanded = typeExp, onDismissRequest = { typeExp = false }) {
+                diffuserTypes.forEachIndexed { i, (label, _, app) ->
+                    DropdownMenuItem(
+                        text = { Column { Text(label); Text(app, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+                        onClick = { typeIdx = i; typeExp = false }
+                    )
+                }
+            }
+        }
+        if (typeIdx == diffuserTypes.size - 1) {
+            HvacField("Throw Constant K", customK) { customK = it }
+        }
+
+        HvacSectionLabel("Flow & Geometry")
+        HvacField("Flow Rate (${if (unitSystem == UnitSystem.IP) "cfm" else "L/s"})", flowStr) { flowStr = it }
+        HvacField("Neck Area (${if (unitSystem == UnitSystem.IP) "ft²" else "m²"})", neckArea) { neckArea = it }
+
+        Button(
+            onClick = {
+                error = null; result = null
+                runCatching {
+                    val K    = if (typeIdx == diffuserTypes.size - 1) customK.toDouble() else diffuserTypes[typeIdx].second
+                    require(K > 0) { "K factor must be > 0" }
+                    val qMs  = if (unitSystem == UnitSystem.IP) flowStr.toDouble() * 0.000472 else flowStr.toDouble() / 1000.0
+                    val akM2 = if (unitSystem == UnitSystem.IP) neckArea.toDouble() * 0.0929 else neckArea.toDouble()
+                    require(akM2 > 0) { "Neck area must be > 0" }
+
+                    // Neck velocity
+                    val vNeck = qMs / akM2  // m/s
+                    val sqrtAk = sqrt(akM2)
+
+                    // Throw: T = K × Q / (Vt × √Ak)  [m]
+                    // Rearranging: T_to_Vt = K × Q / √Ak  then divide by Vt
+                    val numerator = K * qMs / sqrtAk
+
+                    fun throw_m(vt: Double) = numerator / vt
+
+                    val t25 = throw_m(0.25)
+                    val t50 = throw_m(0.50)
+                    val t75 = throw_m(0.75)
+
+                    fun disp(m: Double) = if (unitSystem == UnitSystem.IP) "%.1f ft".format(m * 3.281) else "%.2f m".format(m)
+                    fun vDisp(ms: Double) = if (unitSystem == UnitSystem.IP) "%.0f fpm".format(ms * 196.85) else "%.2f m/s".format(ms)
+
+                    result = listOf(
+                        "Neck Velocity" to vDisp(vNeck),
+                        "---" to "",
+                        "Throw to 0.25 m/s (50 fpm)" to disp(t25),
+                        "Throw to 0.50 m/s (100 fpm)" to disp(t50),
+                        "Throw to 0.75 m/s (150 fpm)" to disp(t75),
+                        "---" to "",
+                        "ASHRAE T₅₀ (recommended)" to disp(t50),
+                        "75% of T₅₀ (min reach)" to "%.2f m / %.1f ft  → AHU supply zone".format(t50 * 0.75, t50 * 0.75 * 3.281),
+                    )
+                }.onFailure { e -> error = e.message ?: "Calculation error" }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Icon(Icons.Default.Calculate, null); Spacer(Modifier.width(8.dp)); Text("Calculate Throw") }
+
+        error?.let { ErrorCard(it) }
+        result?.let { rows ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Diffuser Throw Results", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    HorizontalDivider()
+                    rows.forEach { (k, v) -> if (k == "---") HorizontalDivider() else HvacResultRow(k, v) }
+                }
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("Throw Selection Guide", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+                Text("Select T₅₀ ≥ 75% of the distance to the nearest obstacle or return for good mixing.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("For perimeter heating: use T₂₅ to reach the cold wall without dumping cold air.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Neck velocity 2–6 m/s (400–1200 fpm) typical; above 6 m/s causes noise (NC 35+).",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+// ── Tab 22: Chiller IPLV Calculator ───────────────────────────────────────────
+
+@Composable
+private fun ChillerIplvTab() {
+    var capTons by remember { mutableStateOf("200") }  // Rated capacity in TR
+    // COP at 4 AHRI load points: 100%, 75%, 50%, 25%
+    var copA by remember { mutableStateOf("3.5") }
+    var copB by remember { mutableStateOf("4.5") }
+    var copC by remember { mutableStateOf("5.5") }
+    var copD by remember { mutableStateOf("6.0") }
+    // Condenser entering water temp (°C) at each load point (AHRI 550/590)
+    var result by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var error  by remember { mutableStateOf<String?>(null) }
+
+    // AHRI 550/590 IPLV weighting factors
+    val wA = 0.01; val wB = 0.42; val wC = 0.45; val wD = 0.12
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        HvacSectionLabel("Chiller Rated Capacity")
+        HvacField("Rated Cooling Capacity (tons of refrigeration)", capTons) { capTons = it }
+
+        HvacSectionLabel("COP at AHRI 550/590 Load Points")
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("AHRI weighting: 100% → 1%  |  75% → 42%  |  50% → 45%  |  25% → 12%",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Enter COP at each load point from manufacturer data sheet.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        HvacField("COP at 100% load (Point A)", copA) { copA = it }
+        HvacField("COP at 75% load (Point B)", copB) { copB = it }
+        HvacField("COP at 50% load (Point C)", copC) { copC = it }
+        HvacField("COP at 25% load (Point D)", copD) { copD = it }
+
+        Button(
+            onClick = {
+                error = null; result = null
+                runCatching {
+                    val cA = copA.toDouble(); val cB = copB.toDouble()
+                    val cC = copC.toDouble(); val cD = copD.toDouble()
+                    val cap = capTons.toDouble()
+                    require(cap > 0) { "Capacity must be > 0" }
+                    require(listOf(cA, cB, cC, cD).all { it > 0 }) { "All COP values must be > 0" }
+
+                    // IPLV formula (AHRI 550/590)
+                    val iplv = 1.0 / (wA / cA + wB / cB + wC / cC + wD / cD)
+
+                    // kW/TR at each point
+                    fun kwPerTr(cop: Double) = 3.516 / cop
+                    fun eerBtu(cop: Double) = cop * 3.412
+
+                    // ASHRAE 90.1-2022 minimum IPLV (water-cooled, path-typical limits, kW/TR)
+                    // For water-cooled scroll/screw ≥100 TR typical limit: IPLV ≤ 0.600 kW/TR
+                    val iplvKwTr = kwPerTr(iplv)
+                    val ashrae901MinIplv = when {
+                        cap < 150  -> 0.600
+                        cap < 300  -> 0.560
+                        cap < 600  -> 0.520
+                        else       -> 0.490
+                    }
+                    val compliant = iplvKwTr <= ashrae901MinIplv
+
+                    result = listOf(
+                        "--- IPLV Result" to "",
+                        "IPLV (COP)"      to "%.3f".format(iplv),
+                        "IPLV (kW/TR)"    to "%.3f kW/TR".format(iplvKwTr),
+                        "IPLV (EER)"      to "%.2f Btu/W·h".format(eerBtu(iplv)),
+                        "---" to "",
+                        "--- At Each Load Point" to "",
+                        "Point A (100%) kW/TR" to "%.3f  COP %.2f".format(kwPerTr(cA), cA),
+                        "Point B (75%)  kW/TR" to "%.3f  COP %.2f".format(kwPerTr(cB), cB),
+                        "Point C (50%)  kW/TR" to "%.3f  COP %.2f".format(kwPerTr(cC), cC),
+                        "Point D (25%)  kW/TR" to "%.3f  COP %.2f".format(kwPerTr(cD), cD),
+                        "---" to "",
+                        "--- ASHRAE 90.1-2022" to "",
+                        "Min. IPLV Limit (%.0f TR)".format(cap) to "%.3f kW/TR".format(ashrae901MinIplv),
+                        "Compliance" to if (compliant) "PASS — meets ASHRAE 90.1" else "FAIL — exceeds limit by %.3f kW/TR".format(iplvKwTr - ashrae901MinIplv),
+                        "---" to "",
+                        "--- Annual Estimate" to "",
+                        "Rated Cooling Output" to "%.1f TR  (%.0f kW)".format(cap, cap * 3.516),
+                        "Full-load Power" to "%.0f kW".format(cap * kwPerTr(cA)),
+                        "IPLV Weighted Power" to "%.0f kW  (part-load avg)".format(cap * iplvKwTr),
+                    )
+                }.onFailure { e -> error = e.message ?: "Calculation error" }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Icon(Icons.Default.Calculate, null); Spacer(Modifier.width(8.dp)); Text("Calculate IPLV") }
+
+        error?.let { ErrorCard(it) }
+        result?.let { rows ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Chiller IPLV Results", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    HorizontalDivider()
+                    rows.forEach { (k, v) -> if (k == "---") HorizontalDivider() else HvacResultRow(k, v) }
+                }
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("IPLV Background", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+                Text("IPLV (Integrated Part Load Value) reflects real-world efficiency — chillers run at part load 98% of the year.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("AHRI 550/590 weights: 100%→1%, 75%→42%, 50%→45%, 25%→12% — peak efficiency at 50% load is most important.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Best modern chillers achieve IPLV < 0.35 kW/TR. Compare using kW/TR (lower = better) or COP (higher = better).",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
