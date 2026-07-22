@@ -19,9 +19,9 @@ android {
     defaultConfig {
         applicationId = "com.psychrochart.app"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 32
-        versionName = "16.7.1"
+        targetSdk = 37
+        versionCode = 33
+        versionName = "16.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -87,3 +87,4 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     debugImplementation(libs.androidx.ui.tooling)
 }
+
