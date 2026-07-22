@@ -20,7 +20,7 @@ android {
         applicationId = "com.psychrochart.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 34
+        versionCode = 35
         versionName = "16.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
